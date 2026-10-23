@@ -17,13 +17,17 @@
   - **Pass 1 (Multilingual Semantic Keywords)**: Identifies columns labeled with timestamps (`time`, `date`, `采集时间`, `时间`, etc.) and temperatures (`temp`, `temperature`, `°c`, `温度`).
   - **Pass 2 (Statistical Heuristic)**: When headers are missing or non-standard, scans row values for valid ISO/local time formats and plausible incubator temperatures (20°C to 50°C) with confidence scoring.
 - **Excel Serial Date Support**: Accurately computes day fraction serials (`Date.UTC(1899, 11, 30)` epoch correction) avoiding browser timezone drift.
-- **Automated Metadata Extraction**: Extracts Batch / Lot identifiers (e.g., `EXT-YYYYMM-XX`) and cycle time intervals directly from metadata cells.
+- **Automated Metadata Extraction & Upload Confirmation Dialog**:
+  - Immediately upon selecting a sensor spreadsheet, prompts the user to verify or customize the **Lot Number / Batch Identifier**.
+  - Dynamically updates the target Cloud File Name to match the confirmed Lot Number (`[LotNumber].xlsx`).
+  - Prompts to confirm or adjust the **Start Date & Time** and **End Date & Time** windows with prefilled timestamps.
+  - Action buttons: **"Show Graph"** (instant dashboard rendering) and **"Save to Cloud & Show"** (archives to Firestore under the Lot Number and renders graph).
 - **Bulk Upload & Queued Batch Processing**:
   - Multi-file simultaneous upload via file picker (`multiple`) or direct drag-and-drop.
   - Asynchronous queued pipeline with animated step-by-step progress bars (Reading -> Parsing -> Cloud Sync -> Complete).
-  - Individual per-file diagnostic summaries (total rows, run duration, min/max readings, compliance rate).
+  - Inline editable Lot Numbers on each queue card with automatic cloud filename synchronizing.
+  - Individual action buttons per card: **Show Graph**, **Save Cloud**, and **Adjust Range**.
   - Automatic individual cloud archival for each successfully parsed batch.
-  - Interactive "Load to Graph" switcher to toggle between parsed files on demand.
 
 ### 2. High-Precision Charting & Outlier Highlighting
 - **Interactive Line Visualization**: Smooth cubic spline curves with adaptive dark/light axes and responsive canvas rendering.
@@ -42,6 +46,10 @@
   - Retains the original Excel spreadsheet binary for 1-click re-download.
   - Caches the rendered A4 PDF report for instant audit access.
 - **Real-Time History Drawer**: Slide-out drawer with search by Lot Number, file name, or date, excursion compliance badges, and one-click graph reload.
+- **Simultaneous Bulk Delete**:
+  - Interactive multi-select checkboxes on each historical report card.
+  - "Select All" toggle with indeterminate status reflecting active search/filter sets.
+  - High-performance atomic batch removal using Firestore `writeBatch` with confirmation safeguard.
 - **Authentication**: Single Sign-On with Google Authentication ensuring lab staff records are securely partitioned.
 
 ### 4. Calibrated A4 Landscape Publishing
@@ -94,6 +102,9 @@
 │       ├── exporter.js          # Calibrated A4 canvas preparation, PDF and PNG compilers
 │       ├── main.js              # Event coordinators, file drag/drop, bootstrap lifecycle
 │       └── utils.js             # Time formatters, debounce, theme persistence helpers
+├── .github/
+│   └── workflows/
+│       └── deploy.yml           # Automated GitHub Pages CI/CD pipeline
 ├── src/
 │   └── firebase-bridge.ts       # Secure cloud storage, real-time snapshot sync, Google Auth
 ├── index.html                   # Semantic HTML5 application shell & print staging layout
@@ -122,6 +133,40 @@ http://localhost:3000
 ```bash
 npm run build
 ```
+This generates the optimized static bundle in the `dist/` directory with relative asset links (`./assets/...`) compatible with any root or nested subfolder path.
+
+---
+
+## 🌐 Deploying to GitHub Pages
+
+This project is pre-configured for instant zero-configuration deployment to GitHub Pages via GitHub Actions:
+
+1. **Push your code to GitHub**:
+   ```bash
+   git add .
+   git commit -m "feat: complete automated report system with bulk queue & history"
+   git push origin main
+   ```
+2. **Enable GitHub Pages via Actions**:
+   - In your GitHub repository, go to **Settings** > **Pages**.
+   - Under **Build and deployment** > **Source**, select **GitHub Actions**.
+3. **Automated Pipeline**:
+   - The included `.github/workflows/deploy.yml` workflow will automatically trigger, install dependencies, compile the production bundle (`npm run build`), and deploy to `https://<username>.github.io/<repository-name>/`.
+
+---
+
+## 🔑 Enabling Google Sign-In on GitHub Pages
+
+When your app is hosted at GitHub Pages (e.g. `https://mcpvip1.github.io/HPT/` or a custom domain), Firebase Authentication requires that domain to be added to the list of **Authorized Domains** for your Firebase project (`HPT-TSM`):
+
+1. Open the [Firebase Console](https://console.firebase.google.com/) and select your project (**HPT-TSM**).
+2. Go to **Build** > **Authentication** > **Settings** tab.
+3. Scroll down to the **Authorized domains** card.
+4. Click **Add domain**.
+5. Enter your GitHub Pages domain (e.g. `mcpvip1.github.io` — do not include `https://` or subpaths).
+6. Click **Save**.
+
+> **Note**: Changes take effect immediately. Once authorized, users can sign in with their Google accounts directly from your GitHub Pages URL to synchronize and reload reports.
 
 ---
 

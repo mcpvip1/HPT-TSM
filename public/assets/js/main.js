@@ -94,9 +94,11 @@ const App = {
         if (files.length === 0) return;
         event.target.value = '';
 
-        if (window.QueueManager && typeof window.QueueManager.handleFiles === 'function') {
-            window.QueueManager.handleFiles(files);
-            return;
+        if (files.length > 1) {
+            if (window.QueueManager && typeof window.QueueManager.handleFiles === 'function') {
+                window.QueueManager.handleFiles(files);
+                return;
+            }
         }
 
         const file = files[0];
@@ -136,32 +138,20 @@ const App = {
                 return;
             }
 
-            state.sensorData = bestResult.data;
-            state.rawData = bestResult.data.slice();
+            // Ask user for Lot Number, Start & End times, with buttons to Save and Show Graph
+            if (window.UploadDialog && typeof window.UploadDialog.open === 'function') {
+                window.UploadDialog.open(file, bestResult);
+            } else {
+                state.sensorData = bestResult.data;
+                state.rawData = bestResult.data.slice();
 
-            if (bestResult.lot) {
-                document.getElementById('lotNumberInput').value = bestResult.lot;
-                Dashboard.updateLotBadge();
+                if (bestResult.lot) {
+                    document.getElementById('lotNumberInput').value = bestResult.lot;
+                    Dashboard.updateLotBadge();
+                }
+
+                Dashboard.showFullResult();
             }
-
-            Dashboard.showFullResult();
-
-            if (window.CloudStorage && typeof window.CloudStorage.onNewReportLoaded === 'function') {
-                window.CloudStorage.onNewReportLoaded({
-                    name: file.name,
-                    size: file.size,
-                    fileBuffer: buffer
-                });
-            }
-
-            const firstTime = bestResult.data[0].time;
-            const lastTime = bestResult.data[bestResult.data.length - 1].time;
-            const duration = Utils.formatDuration(firstTime, lastTime);
-
-            Toast.success(
-                '✅ ' + I18n.t('loadedRows', state.language, { n: bestResult.data.length }) +
-                (duration ? ` · Duration: ${duration}` : '')
-            );
 
             Debug.log(
                 `<strong>Used sheet:</strong> ${bestSheetName}<br>` +

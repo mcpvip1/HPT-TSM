@@ -22,7 +22,8 @@ import {
   where, 
   onSnapshot, 
   serverTimestamp, 
-  deleteDoc 
+  deleteDoc,
+  writeBatch
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -211,6 +212,68 @@ function renderAuthUI() {
   }
 }
 
+function showUnauthorizedDomainModal(hostname: string) {
+  if (document.getElementById('domainModalBackdrop')) return;
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'domainModalBackdrop';
+  backdrop.className = 'domain-modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="domain-modal" role="dialog" aria-modal="true" aria-labelledby="domainModalTitle">
+      <div class="domain-modal__header">
+        <h3 id="domainModalTitle" class="domain-modal__title">
+          <span>⚠️ Firebase Auth: Action Required for GitHub Pages</span>
+        </h3>
+        <button id="closeDomainModalBtn" class="history-drawer__close" style="width:28px;height:28px;font-size:14px;">✕</button>
+      </div>
+      <div class="domain-modal__body">
+        <p>Google Sign-In is blocked by Firebase because your deployment domain is not registered in your Firebase project (<strong>HPT-TSM</strong>).</p>
+        
+        <div class="domain-modal__code-box">
+          <span id="domainToCopy">${hostname}</span>
+          <button id="copyDomainBtn" class="domain-modal__copy-btn">📋 Copy Domain</button>
+        </div>
+
+        <ol class="domain-modal__steps">
+          <li>Open the <strong>Firebase Console</strong> for your project <strong>HPT-TSM</strong>.</li>
+          <li>Navigate to <strong>Build</strong> &gt; <strong>Authentication</strong> &gt; <strong>Settings</strong> tab.</li>
+          <li>Scroll down to <strong>Authorized domains</strong> and click <strong>Add domain</strong>.</li>
+          <li>Paste <code>${hostname}</code> and click <strong>Save</strong>.</li>
+        </ol>
+
+        <p style="font-size:12px;color:var(--text-faint);margin-top:8px;">Changes take effect immediately. Once saved, click <strong>Google Sign In</strong> again.</p>
+      </div>
+      <div class="domain-modal__footer">
+        <button id="dismissDomainModalBtn" class="tbtn tbtn--print" style="padding:6px 14px;font-size:12px;">Dismiss</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  const copyBtn = document.getElementById('copyDomainBtn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(hostname).then(() => {
+        copyBtn.textContent = '✅ Copied!';
+        setTimeout(() => { copyBtn.textContent = '📋 Copy Domain'; }, 2000);
+      }).catch(() => {
+        copyBtn.textContent = '✅ Ready';
+      });
+    });
+  }
+
+  const dismiss = () => {
+    backdrop.remove();
+  };
+
+  document.getElementById('closeDomainModalBtn')?.addEventListener('click', dismiss);
+  document.getElementById('dismissDomainModalBtn')?.addEventListener('click', dismiss);
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) dismiss();
+  });
+}
+
 async function handleSignIn() {
   try {
     setSyncStatus('syncing', 'Signing in...');
@@ -233,7 +296,14 @@ async function handleSignIn() {
   } catch (err: any) {
     console.error('Sign-in error:', err);
     setSyncStatus('offline');
-    (window as any).Toast?.error('Sign in failed: ' + (err.message || 'Unknown error'));
+    if (err.code === 'auth/unauthorized-domain') {
+      const host = window.location.hostname;
+      showUnauthorizedDomainModal(host);
+      (window as any).Toast?.error(`Domain "${host}" must be added to Authorized Domains in Firebase.`);
+      console.warn(`[Firebase Auth] Domain "${host}" is not authorized. Add to Firebase Console -> Authentication -> Settings -> Authorized Domains.`);
+    } else {
+      (window as any).Toast?.error('Sign in failed: ' + (err.message || 'Unknown error'));
+    }
   }
 }
 
@@ -245,8 +315,10 @@ async function handleSignOut() {
     }
     await signOut(auth);
     savedReports = [];
+    selectedReportIds.clear();
     renderHistoryDrawer();
     updateHistoryBadge();
+    updateBulkBarUI();
     setSyncStatus('offline', 'Signed out');
     (window as any).Toast?.info('Signed out of cloud database');
   } catch (err: any) {
@@ -326,6 +398,7 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
 
   try {
     const lotInput = (document.getElementById('lotNumberInput') as HTMLInputElement)?.value.trim() || state.lotNumber || 'EXT-UNKNOWN';
+    const cloudFileName = lotInput.toLowerCase().endsWith('.xlsx') ? lotInput : `${lotInput}.xlsx`;
     const minThreshold = parseFloat((document.getElementById('minThreshold') as HTMLInputElement)?.value) || 35.0;
     const maxThreshold = parseFloat((document.getElementById('maxThreshold') as HTMLInputElement)?.value) || 39.0;
     const startRange = (window as any).Dashboard?.readStart() || (state.sensorData[0]?.time || '');
@@ -366,7 +439,7 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
     const payload: SavedReport = {
       id: reportId,
       lotNumber: lotInput,
-      fileName: lastUploadedFile?.name || `Report_${lotInput}.xlsx`,
+      fileName: cloudFileName,
       fileSize: lastUploadedFile?.size || 0,
       fileBase64: (lastUploadedFile && lastUploadedFile.base64.length < 750000) ? lastUploadedFile.base64 : '',
       pdfBase64: (pdfDataUri && pdfDataUri.length < 750000) ? pdfDataUri : '',
@@ -393,7 +466,7 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
     (window as any).Toast?.success(
       isAutoSave 
         ? `☁️ Auto-saved Lot [${lotInput}] to cloud database` 
-        : `☁️ Saved Report Lot [${lotInput}] to cloud`
+        : `☁️ Saved Lot [${lotInput}] (${cloudFileName}) to cloud archive`
     );
   } catch (error) {
     setSyncStatus('offline', 'Save failed');
@@ -509,10 +582,151 @@ export async function deleteReportFromCloud(reportId: string, lotNumber: string)
   try {
     setSyncStatus('syncing', 'Deleting...');
     await deleteDoc(doc(db, 'reports', reportId));
+    selectedReportIds.delete(reportId);
+    updateBulkBarUI();
     (window as any).Toast?.success(`🗑️ Deleted report for Lot ${lotNumber}`);
     setSyncStatus('synced');
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `reports/${reportId}`);
+  }
+}
+
+// History Bulk Selection State
+let selectedReportIds = new Set<string>();
+
+export function updateBulkBarUI(currentFiltered?: SavedReport[]) {
+  const bulkBar = document.getElementById('historyBulkBar');
+  const selectAllCheckbox = document.getElementById('historySelectAllCheckbox') as HTMLInputElement | null;
+  const selectCountText = document.getElementById('historySelectCountText');
+  const bulkDeleteBtn = document.getElementById('historyBulkDeleteBtn') as HTMLButtonElement | null;
+  const bulkDeleteText = document.getElementById('historyBulkDeleteText');
+
+  if (!bulkBar) return;
+
+  if (!currentUser || savedReports.length === 0) {
+    bulkBar.style.display = 'none';
+    selectedReportIds.clear();
+    return;
+  }
+
+  bulkBar.style.display = 'flex';
+
+  // Compute active target list
+  const query = historySearchQuery.trim().toLowerCase();
+  const targetList = currentFiltered || savedReports.filter(r => {
+    if (!query) return true;
+    return (r.lotNumber && r.lotNumber.toLowerCase().includes(query)) ||
+           (r.fileName && r.fileName.toLowerCase().includes(query)) ||
+           (r.startRange && r.startRange.toLowerCase().includes(query));
+  });
+
+  // Prune any selected IDs that no longer exist in savedReports
+  const existingIdSet = new Set(savedReports.map(r => r.id));
+  for (const id of Array.from(selectedReportIds)) {
+    if (!existingIdSet.has(id)) {
+      selectedReportIds.delete(id);
+    }
+  }
+
+  const selectedCount = selectedReportIds.size;
+  const targetCount = targetList.length;
+  const selectedTargetCount = targetList.filter(r => selectedReportIds.has(r.id)).length;
+
+  if (bulkDeleteBtn && bulkDeleteText) {
+    if (selectedCount > 0) {
+      bulkDeleteBtn.disabled = false;
+      bulkDeleteBtn.classList.add('is-active');
+      bulkDeleteText.textContent = `Delete Selected (${selectedCount})`;
+    } else {
+      bulkDeleteBtn.disabled = true;
+      bulkDeleteBtn.classList.remove('is-active');
+      bulkDeleteText.textContent = 'Delete (0)';
+    }
+  }
+
+  if (selectAllCheckbox && selectCountText) {
+    if (targetCount === 0) {
+      selectAllCheckbox.checked = false;
+      selectAllCheckbox.indeterminate = false;
+      selectAllCheckbox.disabled = true;
+      selectCountText.textContent = 'Select All (0)';
+    } else {
+      selectAllCheckbox.disabled = false;
+      if (selectedTargetCount === 0) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+        selectCountText.textContent = `Select All (${targetCount})`;
+      } else if (selectedTargetCount === targetCount) {
+        selectAllCheckbox.checked = true;
+        selectAllCheckbox.indeterminate = false;
+        selectCountText.textContent = `All ${targetCount} Selected`;
+      } else {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = true;
+        selectCountText.textContent = `${selectedTargetCount} of ${targetCount} Selected`;
+      }
+    }
+  }
+}
+
+export function toggleSelectAllReports() {
+  const query = historySearchQuery.trim().toLowerCase();
+  const targetList = savedReports.filter(r => {
+    if (!query) return true;
+    return (r.lotNumber && r.lotNumber.toLowerCase().includes(query)) ||
+           (r.fileName && r.fileName.toLowerCase().includes(query)) ||
+           (r.startRange && r.startRange.toLowerCase().includes(query));
+  });
+
+  if (targetList.length === 0) return;
+
+  const allSelected = targetList.length > 0 && targetList.every(r => selectedReportIds.has(r.id));
+  if (allSelected) {
+    targetList.forEach(r => selectedReportIds.delete(r.id));
+  } else {
+    targetList.forEach(r => selectedReportIds.add(r.id));
+  }
+
+  renderHistoryDrawer();
+}
+
+export async function deleteSelectedReportsFromCloud() {
+  const count = selectedReportIds.size;
+  if (count === 0) return;
+
+  if (!confirm(`Are you sure you want to permanently delete ${count} selected report(s) from Cloud Firestore?\n\nThis operation is irreversible.`)) {
+    return;
+  }
+
+  const bulkDeleteBtn = document.getElementById('historyBulkDeleteBtn') as HTMLButtonElement | null;
+  const bulkDeleteText = document.getElementById('historyBulkDeleteText');
+  if (bulkDeleteBtn) bulkDeleteBtn.disabled = true;
+  if (bulkDeleteText) bulkDeleteText.textContent = `Deleting (${count})...`;
+
+  setSyncStatus('syncing', `Deleting ${count} reports...`);
+
+  try {
+    const ids = Array.from(selectedReportIds);
+    const chunkSize = 400; // Batch limit is 500 in Firestore
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const id of chunk) {
+        batch.delete(doc(db, 'reports', id));
+      }
+      await batch.commit();
+    }
+
+    selectedReportIds.clear();
+    setSyncStatus('synced');
+    (window as any).Toast?.success(`🗑️ Successfully deleted ${count} report(s) from cloud database.`);
+  } catch (err: any) {
+    console.error('Bulk delete failed:', err);
+    setSyncStatus('offline', 'Delete failed');
+    handleFirestoreError(err, OperationType.DELETE, 'reports');
+    (window as any).Toast?.error('Failed to delete selected reports: ' + (err.message || 'Unknown error'));
+  } finally {
+    updateBulkBarUI();
   }
 }
 
@@ -550,6 +764,7 @@ export function renderHistoryDrawer() {
         </button>
       </div>
     `;
+    updateBulkBarUI([]);
     return;
   }
 
@@ -561,6 +776,7 @@ export function renderHistoryDrawer() {
         <p>Upload an Excel sensor file or click "Save Cloud" to store your first report.</p>
       </div>
     `;
+    updateBulkBarUI([]);
     return;
   }
 
@@ -580,6 +796,7 @@ export function renderHistoryDrawer() {
         <p>No reports matched "${historySearchQuery}". Try another Lot Number.</p>
       </div>
     `;
+    updateBulkBarUI(filtered);
     return;
   }
 
@@ -597,12 +814,19 @@ export function renderHistoryDrawer() {
       ? report.updatedAt.toDate().toLocaleString() 
       : (report.startRange || '—');
 
+    const isSelected = selectedReportIds.has(report.id);
+
     return `
-      <div class="history-card" data-id="${report.id}">
+      <div class="history-card ${isSelected ? 'history-card--selected' : ''}" data-id="${report.id}">
         <div class="history-card__header">
-          <div class="history-card__lot">
-            <span class="lot-icon">🏷️</span>
-            <strong class="lot-number">${report.lotNumber || '—'}</strong>
+          <div class="history-card__header-left">
+            <label class="history-card__select" title="Select report" onclick="event.stopPropagation()">
+              <input type="checkbox" class="history-card-checkbox" data-id="${report.id}" ${isSelected ? 'checked' : ''}>
+            </label>
+            <div class="history-card__lot">
+              <span class="lot-icon">🏷️</span>
+              <strong class="lot-number">${report.lotNumber || '—'}</strong>
+            </div>
           </div>
           ${statusBadge}
         </div>
@@ -657,6 +881,28 @@ export function renderHistoryDrawer() {
       </div>
     `;
   }).join('');
+
+  // Attach card checkbox event listeners
+  listEl.querySelectorAll('.history-card-checkbox').forEach(chk => {
+    chk.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const target = e.target as HTMLInputElement;
+      const id = target.getAttribute('data-id');
+      if (!id) return;
+      if (target.checked) {
+        selectedReportIds.add(id);
+      } else {
+        selectedReportIds.delete(id);
+      }
+      const card = listEl.querySelector(`.history-card[data-id="${id}"]`);
+      if (card) {
+        card.classList.toggle('history-card--selected', target.checked);
+      }
+      updateBulkBarUI(filtered);
+    });
+  });
+
+  updateBulkBarUI(filtered);
 }
 
 export async function saveDirectReport(reportPayload: {
@@ -737,6 +983,8 @@ export async function saveDirectReport(reportPayload: {
     if (report) downloadReportPdf(report);
   },
   deleteReport: deleteReportFromCloud,
+  deleteSelectedReports: deleteSelectedReportsFromCloud,
+  toggleSelectAll: toggleSelectAllReports,
   onNewReportLoaded: async (fileInfo: { name: string; size: number; fileBuffer: ArrayBuffer }) => {
     try {
       // Convert buffer to Base64
@@ -765,13 +1013,17 @@ export async function saveDirectReport(reportPayload: {
   }
 };
 
-// Bind history search and close events once DOM is loaded
+// Bind history search, selection, and close events once DOM is loaded
 window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('historyToggleBtn')?.addEventListener('click', () => toggleHistoryDrawer());
+  document.getElementById('panelSaveCloudBtn')?.addEventListener('click', () => saveCurrentReportToCloud(false));
   document.getElementById('saveCloudBtn')?.addEventListener('click', () => saveCurrentReportToCloud(false));
   document.getElementById('historyCloseBtn')?.addEventListener('click', () => toggleHistoryDrawer(false));
   document.getElementById('historyBackdrop')?.addEventListener('click', () => toggleHistoryDrawer(false));
   
+  document.getElementById('historySelectAllCheckbox')?.addEventListener('change', toggleSelectAllReports);
+  document.getElementById('historyBulkDeleteBtn')?.addEventListener('click', deleteSelectedReportsFromCloud);
+
   const searchInput = document.getElementById('historySearchInput') as HTMLInputElement;
   if (searchInput) {
     searchInput.addEventListener('input', (e) => {
