@@ -1,0 +1,6 @@
+{
+  "name": "Temperature Test Report Pro",
+  "description": "A quadrilingual (EN / 中文 / ไทย / မြန်မာ) dashboard for analysing temperature-sensor Excel exports with light and dark mode, auto column detection, and PDF/PNG export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

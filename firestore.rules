@@ -1,0 +1,100 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Validation helper for Report
+    function isValidReport(data) {
+      return data.keys().hasAll(['lotNumber', 'minThreshold', 'maxThreshold', 'userId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'lotNumber', 'fileName', 'fileSize', 'fileBase64', 'pdfBase64',
+          'minThreshold', 'maxThreshold', 'startRange', 'endRange',
+          'minTemp', 'maxTemp', 'duration', 'rowCount', 'sensorData',
+          'chartMode', 'userId', 'userEmail', 'userDisplayName',
+          'createdAt', 'updatedAt'
+        ])
+        && data.userId == request.auth.uid
+        && data.lotNumber is string && data.lotNumber.size() > 0 && data.lotNumber.size() <= 100
+        && data.minThreshold is number && data.minThreshold >= -50.0 && data.minThreshold <= 150.0
+        && data.maxThreshold is number && data.maxThreshold >= -50.0 && data.maxThreshold <= 150.0
+        && data.minThreshold <= data.maxThreshold
+        && (!('fileName' in data) || (data.fileName is string && data.fileName.size() <= 255))
+        && (!('fileSize' in data) || (data.fileSize is number))
+        && (!('fileBase64' in data) || (data.fileBase64 is string && data.fileBase64.size() <= 1500000))
+        && (!('pdfBase64' in data) || (data.pdfBase64 is string && data.pdfBase64.size() <= 1500000))
+        && (!('startRange' in data) || (data.startRange is string && data.startRange.size() <= 64))
+        && (!('endRange' in data) || (data.endRange is string && data.endRange.size() <= 64))
+        && (!('duration' in data) || (data.duration is string && data.duration.size() <= 64))
+        && (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 255))
+        && (!('userDisplayName' in data) || (data.userDisplayName is string && data.userDisplayName.size() <= 150))
+        && (!('chartMode' in data) || (data.chartMode in ['color', 'mono']));
+    }
+
+    // Reports collection
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn()
+        && isValidId(reportId)
+        && isValidReport(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+        
+      allow update: if isSignedIn()
+        && isValidId(reportId)
+        && existing().userId == request.auth.uid
+        && isValidReport(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+        
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // Validation helper for UserProfile
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['userId', 'email'])
+        && data.keys().hasOnly(['userId', 'email', 'displayName', 'photoURL', 'updatedAt'])
+        && data.userId == request.auth.uid
+        && data.email is string && data.email.size() <= 255
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 150))
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000));
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false; // PII protection: no listing user profiles
+      allow create, update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+  }
+}

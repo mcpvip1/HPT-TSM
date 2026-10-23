@@ -1,0 +1,151 @@
+{
+  "entities": {
+    "Report": {
+      "title": "Report",
+      "description": "Temperature test report with Lot Number, time ranges, thresholds, raw data and exported documents",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique report ID"
+        },
+        "lotNumber": {
+          "type": "string",
+          "description": "Batch or Lot identification number",
+          "maxLength": 100
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Original uploaded file name",
+          "maxLength": 255
+        },
+        "fileSize": {
+          "type": "number",
+          "description": "Original file size in bytes"
+        },
+        "fileBase64": {
+          "type": "string",
+          "description": "Base64 encoded original Excel/CSV file contents"
+        },
+        "pdfBase64": {
+          "type": "string",
+          "description": "Base64 encoded generated A4 report PDF"
+        },
+        "minThreshold": {
+          "type": "number",
+          "description": "Configured minimum temperature threshold in °C"
+        },
+        "maxThreshold": {
+          "type": "number",
+          "description": "Configured maximum temperature threshold in °C"
+        },
+        "startRange": {
+          "type": "string",
+          "description": "Starting timestamp of analysis range",
+          "maxLength": 64
+        },
+        "endRange": {
+          "type": "string",
+          "description": "Ending timestamp of analysis range",
+          "maxLength": 64
+        },
+        "minTemp": {
+          "type": "number",
+          "description": "Calculated minimum temperature recorded in run"
+        },
+        "maxTemp": {
+          "type": "number",
+          "description": "Calculated maximum temperature recorded in run"
+        },
+        "duration": {
+          "type": "string",
+          "description": "Formatted duration between start and end range",
+          "maxLength": 64
+        },
+        "rowCount": {
+          "type": "number",
+          "description": "Total number of valid parsed data rows"
+        },
+        "chartMode": {
+          "type": "string",
+          "description": "Chart display mode (color or mono)",
+          "enum": ["color", "mono"]
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the user who saved or uploaded the report"
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "Email address of the user who saved or uploaded the report",
+          "maxLength": 255
+        },
+        "userDisplayName": {
+          "type": "string",
+          "description": "Display name of the user who saved or uploaded the report",
+          "maxLength": 150
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the report was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the report was last updated"
+        }
+      },
+      "required": [
+        "lotNumber",
+        "minThreshold",
+        "maxThreshold",
+        "userId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 255
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 150
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User profile photo URL",
+          "maxLength": 1000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last login timestamp"
+        }
+      },
+      "required": ["userId", "email"]
+    }
+  },
+  "firestore": {
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Collection of saved temperature test reports with Lot Numbers and sensor records"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile store for authenticated staff"
+    }
+  }
+}
