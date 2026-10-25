@@ -155,3 +155,8 @@ window.debugAppearance = function () {
         storage: storage
     });
 };
+
+window.Utils = Utils;
+window.Toast = Toast;
+window.Appearance = Appearance;
+window.Debug = Debug;

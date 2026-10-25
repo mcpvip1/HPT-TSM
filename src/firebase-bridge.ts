@@ -274,7 +274,37 @@ function showUnauthorizedDomainModal(hostname: string) {
   });
 }
 
+let isSigningIn = false;
+
 async function handleSignIn() {
+  if (isSigningIn) {
+    console.warn('[Firebase Auth] Sign-in operation already in progress. Ignoring duplicate click.');
+    return;
+  }
+  isSigningIn = true;
+
+  const signInBtn = document.getElementById('signInBtn') as HTMLButtonElement | null;
+  const historySignInBtn = document.querySelector('.history-empty .tbtn--upload') as HTMLButtonElement | null;
+  
+  if (signInBtn) {
+    signInBtn.disabled = true;
+    signInBtn.style.pointerEvents = 'none';
+    signInBtn.style.opacity = '0.7';
+    signInBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor"></path>
+      </svg>
+      <span>Signing In...</span>
+    `;
+  }
+  if (historySignInBtn) {
+    historySignInBtn.disabled = true;
+    historySignInBtn.style.pointerEvents = 'none';
+    historySignInBtn.style.opacity = '0.7';
+    historySignInBtn.textContent = 'Signing In...';
+  }
+
   try {
     setSyncStatus('syncing', 'Signing in...');
     const provider = new GoogleAuthProvider();
@@ -294,15 +324,40 @@ async function handleSignIn() {
 
     (window as any).Toast?.success(`Signed in as ${user.displayName || user.email}`);
   } catch (err: any) {
-    console.error('Sign-in error:', err);
-    setSyncStatus('offline');
-    if (err.code === 'auth/unauthorized-domain') {
+    const errorCode = err?.code || '';
+    if (errorCode === 'auth/cancelled-popup-request') {
+      console.warn('[Firebase Auth] Sign-in popup was cancelled or superseded by another request.');
+      setSyncStatus('offline');
+      return;
+    }
+    if (errorCode === 'auth/popup-closed-by-user') {
+      console.warn('[Firebase Auth] Sign-in popup was closed by user.');
+      setSyncStatus('offline');
+      return;
+    }
+    if (errorCode === 'auth/popup-blocked') {
+      console.warn('[Firebase Auth] Sign-in popup was blocked by browser.');
+      (window as any).Toast?.warning('Sign-in popup blocked. Please allow popups for this page and try again.');
+      setSyncStatus('offline');
+      return;
+    }
+    if (errorCode === 'auth/unauthorized-domain') {
       const host = window.location.hostname;
       showUnauthorizedDomainModal(host);
       (window as any).Toast?.error(`Domain "${host}" must be added to Authorized Domains in Firebase.`);
       console.warn(`[Firebase Auth] Domain "${host}" is not authorized. Add to Firebase Console -> Authentication -> Settings -> Authorized Domains.`);
-    } else {
-      (window as any).Toast?.error('Sign in failed: ' + (err.message || 'Unknown error'));
+      setSyncStatus('offline');
+      return;
+    }
+
+    console.error('Sign-in error:', err);
+    setSyncStatus('offline');
+    (window as any).Toast?.error('Sign in failed: ' + (err.message || 'Unknown error'));
+  } finally {
+    isSigningIn = false;
+    if (!currentUser) {
+      renderAuthUI();
+      renderHistoryDrawer();
     }
   }
 }
@@ -480,12 +535,24 @@ export function loadReportIntoApp(report: SavedReport) {
     return;
   }
 
-  const state = (window as any).state;
+  const state = (window as any).state || ((window as any).state = {
+    sensorData: [],
+    rawData: [],
+    chart: null,
+    printChart: null,
+    language: 'en',
+    lotNumber: '',
+    chartMode: 'color',
+    appearance: 'light',
+    highlightOutliers: true
+  });
   const Dashboard = (window as any).Dashboard;
+  const ChartFactory = (window as any).ChartFactory;
 
   state.sensorData = report.sensorData.slice();
   state.rawData = report.sensorData.slice();
   state.lotNumber = report.lotNumber || '';
+  state.currentFileName = report.fileName || '';
 
   const lotInput = document.getElementById('lotNumberInput') as HTMLInputElement;
   if (lotInput) {
@@ -502,12 +569,22 @@ export function loadReportIntoApp(report: SavedReport) {
     Dashboard.setChartMode(report.chartMode);
   }
 
+  // Ensure chart canvas exists and is initialized if null
+  if (!state.chart && ChartFactory && document.getElementById('mainChart')) {
+    state.chart = ChartFactory.createMain(document.getElementById('mainChart'));
+  }
+
   if (report.startRange && report.endRange) {
     Dashboard?._write('start', report.startRange);
     Dashboard?._write('end', report.endRange);
     Dashboard?.update();
   } else {
     Dashboard?.showFullResult();
+  }
+
+  // Persist into auto-saver so refresh keeps loaded report
+  if ((window as any).AutoSaver?.save) {
+    (window as any).AutoSaver.save();
   }
 
   // Close drawer
@@ -806,77 +883,67 @@ export function renderHistoryDrawer() {
     const isExcursion = (report.minTemp != null && report.minTemp < minThreshold) ||
                         (report.maxTemp != null && report.maxTemp > maxThreshold);
 
-    const statusBadge = isExcursion
-      ? `<span class="badge badge--warn">⚠️ Excursion (${report.minTemp}°–${report.maxTemp}°C)</span>`
-      : `<span class="badge badge--ok">✅ Compliant (${report.minTemp}°–${report.maxTemp}°C)</span>`;
-
     const dateFormatted = report.updatedAt?.toDate 
       ? report.updatedAt.toDate().toLocaleString() 
       : (report.startRange || '—');
 
     const isSelected = selectedReportIds.has(report.id);
+    const displayName = report.fileName || (report.lotNumber ? `Lot_${report.lotNumber}.xlsx` : 'Sensor_Data.xlsx');
 
     return `
       <div class="history-card ${isSelected ? 'history-card--selected' : ''}" data-id="${report.id}">
-        <div class="history-card__header">
-          <div class="history-card__header-left">
-            <label class="history-card__select" title="Select report" onclick="event.stopPropagation()">
-              <input type="checkbox" class="history-card-checkbox" data-id="${report.id}" ${isSelected ? 'checked' : ''}>
-            </label>
-            <div class="history-card__lot">
-              <span class="lot-icon">🏷️</span>
-              <strong class="lot-number">${report.lotNumber || '—'}</strong>
+        <!-- Primary Compact Row: File Name, Lot, Load, Delete, Details trigger -->
+        <div class="history-card__main-row">
+          <label class="history-card__select" title="Select report" onclick="event.stopPropagation()">
+            <input type="checkbox" class="history-card-checkbox" data-id="${report.id}" ${isSelected ? 'checked' : ''}>
+          </label>
+
+          <div class="history-card__identity" onclick="window.CloudStorage.toggleDetails('${report.id}')" title="Click to view full details">
+            <div class="history-card__file-name">
+              <span class="file-icon">📄</span>
+              <strong class="file-title truncate">${displayName}</strong>
+            </div>
+            <div class="history-card__lot-sub">
+              <span class="lot-pill">Lot: ${report.lotNumber || '—'}</span>
+              <span class="details-toggle-lbl" id="details-lbl-${report.id}">Details ▾</span>
             </div>
           </div>
-          ${statusBadge}
-        </div>
-        
-        <div class="history-card__meta">
-          <div class="meta-row">
-            <span class="meta-label">File:</span>
-            <span class="meta-val truncate" title="${report.fileName || ''}">${report.fileName || 'Excel Log'}</span>
-          </div>
-          <div class="meta-row">
-            <span class="meta-label">Date:</span>
-            <span class="meta-val">${dateFormatted}</span>
-          </div>
-          <div class="meta-row">
-            <span class="meta-label">Duration:</span>
-            <span class="meta-val">${report.duration || '—'} (${report.rowCount || 0} pts)</span>
-          </div>
-          <div class="meta-row">
-            <span class="meta-label">Range:</span>
-            <span class="meta-val">${minThreshold}°C ~ ${maxThreshold}°C</span>
+
+          <div class="history-card__actions">
+            <button class="hcard-btn hcard-btn--load" onclick="window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span>Load</span>
+            </button>
+            <button class="hcard-btn hcard-btn--delete" onclick="window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber}')" title="Delete from cloud">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+              </svg>
+            </button>
           </div>
         </div>
 
-        <div class="history-card__actions">
-          <button class="hcard-btn hcard-btn--load" onclick="window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-            </svg>
-            <span>Load</span>
-          </button>
-          
-          <button class="hcard-btn" onclick="window.CloudStorage.downloadExcel('${report.id}')" title="Download Excel spreadsheet">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-            </svg>
-            <span>Excel</span>
-          </button>
-          
-          <button class="hcard-btn" onclick="window.CloudStorage.downloadPdf('${report.id}')" title="Download A4 PDF report">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/>
-            </svg>
-            <span>PDF</span>
-          </button>
-
-          <button class="hcard-btn hcard-btn--delete" onclick="window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber}')" title="Delete from cloud">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-            </svg>
-          </button>
+        <!-- Collapsible Details Tray (Hidden by default, shown on click) -->
+        <div class="history-card__details" id="hdetails-${report.id}" style="display:none;">
+          <div class="history-card__details-grid">
+            <div class="meta-row">
+              <span class="meta-label">Saved:</span>
+              <span class="meta-val">${dateFormatted}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Duration:</span>
+              <span class="meta-val">${report.duration || '—'} (${report.rowCount || report.sensorData?.length || 0} pts)</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Limits:</span>
+              <span class="meta-val">${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Recorded:</span>
+              <span class="meta-val ${isExcursion ? 'text-red-500 font-bold' : 'text-emerald-500 font-bold'}">${report.minTemp != null ? report.minTemp.toFixed(1) : '—'}°C ~ ${report.maxTemp != null ? report.maxTemp.toFixed(1) : '—'}°C</span>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -970,6 +1037,14 @@ export async function saveDirectReport(reportPayload: {
   saveCurrentReport: () => saveCurrentReportToCloud(false),
   saveDirectReport: saveDirectReport,
   toggleHistory: toggleHistoryDrawer,
+  toggleDetails: (id: string) => {
+    const el = document.getElementById(`hdetails-${id}`);
+    const lbl = document.getElementById(`details-lbl-${id}`);
+    if (!el) return;
+    const isHidden = el.style.display === 'none';
+    el.style.display = isHidden ? 'block' : 'none';
+    if (lbl) lbl.textContent = isHidden ? 'Details ▴' : 'Details ▾';
+  },
   loadReport: (id: string) => {
     const report = savedReports.find(r => r.id === id);
     if (report) loadReportIntoApp(report);

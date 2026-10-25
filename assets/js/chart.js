@@ -495,3 +495,5 @@ const TooltipHandler = {
         tip.style.transform = 'translate(-50%, calc(-100% - 12px))';
     }
 };
+
+window.ChartFactory = ChartFactory;

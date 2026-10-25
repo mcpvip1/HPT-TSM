@@ -43,3 +43,8 @@ function isDarkMode() {
     const root = document.documentElement;
     return root.getAttribute('data-theme') === 'dark' || root.classList.contains('dark');
 }
+
+// Global window bindings for cross-module integration
+window.CONFIG = CONFIG;
+window.state = state;
+window.isDarkMode = isDarkMode;

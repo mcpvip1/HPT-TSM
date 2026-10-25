@@ -1840,6 +1840,90 @@ button:focus {
     white-space: nowrap;
 }
 
+/* Compact Clean History Card Layout */
+.history-card__main-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.history-card__identity {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.history-card__file-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.file-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.file-title {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.history-card__lot-sub {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+}
+
+.lot-pill {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.details-toggle-lbl {
+    color: var(--text-muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    transition: color 0.15s ease;
+}
+
+.history-card__identity:hover .details-toggle-lbl {
+    color: var(--accent);
+}
+
+.history-card__details {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-light);
+    animation: fadeInTray 0.2s ease;
+}
+
+@keyframes fadeInTray {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.history-card__details-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 11.5px;
+    background: var(--bg-surface-alt);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
 .history-card__actions {
     display: flex;
     align-items: center;
@@ -1936,6 +2020,38 @@ button:focus {
     height: 6px;
     border-radius: 50%;
     background: #10b981;
+}
+
+/* Offline Connectivity Indicator */
+.offline-banner {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    z-index: 9999;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: #d97706;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+    animation: fadeInTray 0.2s ease;
+}
+
+.offline-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffffff;
+    animation: pulseDot 1.5s infinite;
+}
+
+@keyframes pulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
 }
 
 

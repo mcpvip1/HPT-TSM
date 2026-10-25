@@ -118,3 +118,5 @@ const Exporter = {
         }
     }
 };
+
+window.Exporter = Exporter;

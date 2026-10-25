@@ -177,3 +177,5 @@ const Parser = {
         return { data: parsed, lot: metadata.lot, start: useStart, end: useEnd, _detectedCols: cols };
     }
 };
+
+window.Parser = Parser;

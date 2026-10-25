@@ -146,11 +146,22 @@ const Dashboard = {
             }
         }
 
-        state.chart.data.labels = labels;
-        state.chart.data.datasets[0].data = temps;
-        state.chart.options.scales.y.min = Math.floor(Math.min(minT, minThreshold) - 1);
-        state.chart.options.scales.y.max = Math.ceil(Math.max(maxT, maxThreshold) + 1);
-        state.chart.update();
+        if (state.chart) {
+            state.chart.data.labels = labels;
+            state.chart.data.datasets[0].data = temps;
+            state.chart.options.scales.y.min = Math.floor(Math.min(minT, minThreshold) - 1);
+            state.chart.options.scales.y.max = Math.ceil(Math.max(maxT, maxThreshold) + 1);
+            state.chart.update();
+        } else if (window.ChartFactory && document.getElementById('mainChart')) {
+            state.chart = ChartFactory.createMain(document.getElementById('mainChart'));
+            if (state.chart) {
+                state.chart.data.labels = labels;
+                state.chart.data.datasets[0].data = temps;
+                state.chart.options.scales.y.min = Math.floor(Math.min(minT, minThreshold) - 1);
+                state.chart.options.scales.y.max = Math.ceil(Math.max(maxT, maxThreshold) + 1);
+                state.chart.update();
+            }
+        }
     },
 
     toggleOutliers() {
@@ -170,6 +181,10 @@ const Dashboard = {
             colorBtn.classList.toggle('is-active', mode === 'color');
             monoBtn.classList.toggle('is-active', mode === 'mono');
         }
-        ChartFactory.applyPalette(state.chart);
+        if (window.ChartFactory && state.chart) {
+            ChartFactory.applyPalette(state.chart);
+        }
     }
 };
+
+window.Dashboard = Dashboard;

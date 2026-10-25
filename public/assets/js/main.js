@@ -1,3 +1,87 @@
+// Periodic Auto-Save System
+const AutoSaver = {
+    STORAGE_KEY: 'hpt_autosave_state',
+    timer: null,
+
+    save() {
+        try {
+            if (!state || !state.sensorData || state.sensorData.length === 0) return;
+            const lotInput = document.getElementById('lotNumberInput');
+            const minInput = document.getElementById('minThreshold');
+            const maxInput = document.getElementById('maxThreshold');
+            
+            const payload = {
+                timestamp: Date.now(),
+                lotNumber: (lotInput ? lotInput.value.trim() : state.lotNumber) || state.lotNumber || '',
+                sensorData: state.sensorData,
+                startRange: (window.Dashboard && typeof window.Dashboard.readStart === 'function') ? window.Dashboard.readStart() : '',
+                endRange: (window.Dashboard && typeof window.Dashboard.readEnd === 'function') ? window.Dashboard.readEnd() : '',
+                minThreshold: minInput ? parseFloat(minInput.value) : 35.0,
+                maxThreshold: maxInput ? parseFloat(maxInput.value) : 39.0,
+                chartMode: state.chartMode || 'color',
+                fileName: state.currentFileName || ''
+            };
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(payload));
+        } catch (e) {
+            console.warn('[AutoSaver] Storage write failed', e);
+        }
+    },
+
+    startPeriodic(intervalMs = 15000) {
+        if (this.timer) clearInterval(this.timer);
+        this.timer = setInterval(() => this.save(), intervalMs);
+        window.addEventListener('beforeunload', () => this.save());
+    },
+
+    restore() {
+        try {
+            const raw = localStorage.getItem(this.STORAGE_KEY);
+            if (!raw) return false;
+            const data = JSON.parse(raw);
+            if (!data || !data.sensorData || !Array.isArray(data.sensorData) || data.sensorData.length === 0) return false;
+            
+            state.sensorData = data.sensorData;
+            state.rawData = data.sensorData.slice();
+            state.lotNumber = data.lotNumber || '';
+            state.chartMode = data.chartMode || 'color';
+
+            const lotInput = document.getElementById('lotNumberInput');
+            if (lotInput) lotInput.value = state.lotNumber;
+            const minInput = document.getElementById('minThreshold');
+            if (minInput && data.minThreshold != null) minInput.value = String(data.minThreshold);
+            const maxInput = document.getElementById('maxThreshold');
+            if (maxInput && data.maxThreshold != null) maxInput.value = String(data.maxThreshold);
+
+            if (data.startRange && data.endRange && window.Dashboard) {
+                Dashboard._write('start', data.startRange);
+                Dashboard._write('end', data.endRange);
+                Dashboard.update();
+            } else if (window.Dashboard) {
+                Dashboard.showFullResult();
+            }
+
+            if (window.Dashboard) {
+                Dashboard.updateLotBadge();
+                Dashboard.setChartMode(state.chartMode);
+            }
+            if (window.Toast) {
+                const timeStr = new Date(data.timestamp).toLocaleTimeString();
+                window.Toast.info(`🔄 Restored auto-saved session (${data.lotNumber || 'Lot'} · ${timeStr})`);
+            }
+            return true;
+        } catch (e) {
+            console.warn('[AutoSaver] Restore failed', e);
+            return false;
+        }
+    },
+
+    clear() {
+        try { localStorage.removeItem(this.STORAGE_KEY); } catch (e) {}
+    }
+};
+
+window.AutoSaver = AutoSaver;
+
 const App = {
     init() {
         Toast.init();
@@ -6,12 +90,18 @@ const App = {
 
         state.chart = ChartFactory.createMain(document.getElementById('mainChart'));
 
-        state.sensorData = this.generateDemoData();
-        state.rawData = state.sensorData.slice();
+        // Restore autosaved report if available, otherwise generate default demo data
+        const restored = AutoSaver.restore();
+        if (!restored) {
+            state.sensorData = this.generateDemoData();
+            state.rawData = state.sensorData.slice();
+            Dashboard.showFullResult();
+            Dashboard.updateLotBadge();
+            Dashboard.setChartMode('color');
+        }
 
-        Dashboard.showFullResult();
-        Dashboard.updateLotBadge();
-        Dashboard.setChartMode('color');
+        // Start periodic auto-save
+        AutoSaver.startPeriodic(15000);
 
         /* Apply theme-aware chart colors after the chart exists */
         ChartFactory.refreshTheme(state.chart);
@@ -189,5 +279,7 @@ const App = {
         return out;
     }
 };
+
+window.App = App;
 
 window.addEventListener('DOMContentLoaded', () => App.init());

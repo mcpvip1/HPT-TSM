@@ -11,6 +11,13 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/png" href="assets/images/logo.png">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="TempReport">
 
     <!-- Prevent flash of incorrect theme (FOUC) -->
     <script>
@@ -102,6 +109,15 @@
             </div>
 
             <div class="toolbar__right">
+                <button id="pwaInstallBtn" class="tbtn tbtn--print" style="display:none;" title="Install application on device">
+                    <span class="tbtn__icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                    </span>
+                    <span>Install</span>
+                </button>
+
                 <button id="historyToggleBtn" class="tbtn tbtn--history" title="View Cloud Saved Reports">
                     <span class="tbtn__icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -605,6 +621,76 @@
             </div>
         </div>
     </div>
+
+    <!-- OFFLINE STATUS INDICATOR -->
+    <div id="offlineBanner" class="offline-banner" style="display:none;">
+        <span class="offline-dot"></span>
+        <span>Offline Mode — Cached data and tools active</span>
+    </div>
+
+    <!-- PWA Service Worker & Install Manager -->
+    <script>
+        // Register Service Worker for offline caching
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => {
+                        console.log('[SW] Service worker registered on scope:', reg.scope);
+                        reg.onupdatefound = () => {
+                            const installingWorker = reg.installing;
+                            if (installingWorker) {
+                                installingWorker.onstatechange = () => {
+                                    if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        console.log('[SW] New version available.');
+                                    }
+                                };
+                            }
+                        };
+                    })
+                    .catch(err => console.warn('[SW] Service worker registration error:', err));
+            });
+        }
+
+        // Offline / Online Connectivity Indicator
+        function updateNetworkConnectivity() {
+            const banner = document.getElementById('offlineBanner');
+            if (!banner) return;
+            banner.style.display = navigator.onLine ? 'none' : 'inline-flex';
+        }
+        window.addEventListener('online', updateNetworkConnectivity);
+        window.addEventListener('offline', updateNetworkConnectivity);
+        updateNetworkConnectivity();
+
+        // In-App PWA Install Prompt Handler
+        let deferredPwaPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPwaPrompt = e;
+            const installBtn = document.getElementById('pwaInstallBtn');
+            if (installBtn) installBtn.style.display = 'inline-flex';
+        });
+
+        const pwaInstallBtn = document.getElementById('pwaInstallBtn');
+        if (pwaInstallBtn) {
+            pwaInstallBtn.addEventListener('click', async () => {
+                if (deferredPwaPrompt) {
+                    deferredPwaPrompt.prompt();
+                    const { outcome } = await deferredPwaPrompt.userChoice;
+                    if (outcome === 'accepted') {
+                        pwaInstallBtn.style.display = 'none';
+                    }
+                    deferredPwaPrompt = null;
+                }
+            });
+        }
+
+        window.addEventListener('appinstalled', () => {
+            const installBtn = document.getElementById('pwaInstallBtn');
+            if (installBtn) installBtn.style.display = 'none';
+            deferredPwaPrompt = null;
+            if (window.Toast) window.Toast.success('🎉 App installed successfully!');
+        });
+    </script>
 
     <script type="module" src="/src/firebase-bridge.ts"></script>
 </body>
