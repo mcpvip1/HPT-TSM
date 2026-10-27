@@ -46,6 +46,51 @@
 
     <!-- CSS with cache-buster -->
     <link rel="stylesheet" href="assets/css/style.css?v=20260919">
+
+    <style>
+        /* Hide cloud status and auth button by default; only show after clicking logo 3 times */
+        #cloudSyncStatus,
+        #authContainer,
+        #authContainer > #signInBtn {
+            display: none !important;
+        }
+
+        body.show-cloud-controls #cloudSyncStatus {
+            display: inline-flex !important;
+        }
+
+        body.show-cloud-controls #authContainer {
+            display: flex !important;
+        }
+
+        body.show-cloud-controls #authContainer > #signInBtn {
+            display: inline-flex !important;
+        }
+
+        .brand-header {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .brand-header__logo {
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: transform 0.15s ease;
+        }
+
+        .brand-header__logo:active {
+            transform: scale(0.92);
+        }
+
+        .brand-header__author {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin: 2px 0 0 0;
+            letter-spacing: 0.04em;
+            font-weight: 500;
+        }
+    </style>
 </head>
 
 <body class="min-h-screen p-4 sm:p-6 lg:p-8">
@@ -53,10 +98,11 @@
     <div class="max-w-[1400px] mx-auto space-y-5">
 
         <header class="brand-header no-print">
-            <img src="assets/images/logo.png" alt="EXCELLENT" class="brand-header__logo">
+            <img src="assets/images/logo.png" alt="EXCELLENT" class="brand-header__logo" title="Click 3 times to toggle cloud controls">
             <div class="brand-header__text">
-                <h1 class="brand-header__name">EXCELLENT MEDICAL TECHNOLOGY (THAILAND) CO., LTD.</h1>
+                <h1 class="brand-header__name">EXCELLENT MEDICAL TECHNOLOGY TSM</h1>
                 <p class="brand-header__tag" data-i18n="brandTagline">Temperature Monitoring &amp; Reporting System</p>
+                <p class="brand-header__author">Created by: HPT-DO2</p>
             </div>
         </header>
 
@@ -692,7 +738,72 @@
         });
     </script>
 
-    <script type="module" src="/src/firebase-bridge.ts"></script>
+    <script>
+        // Triple-click on brand logo to toggle cloud controls (Show/Hide)
+        (function () {
+            let logoClickCount = 0;
+            let logoClickTimer = null;
+
+            function triggerToggle() {
+                const isShown = document.body.classList.toggle('show-cloud-controls');
+                if (window.Toast && typeof window.Toast.info === 'function') {
+                    window.Toast.info(isShown ? '☁️ Cloud sync & Auth controls revealed' : '🔒 Cloud sync & Auth controls hidden');
+                }
+            }
+
+            function handleLogoClick(e) {
+                logoClickCount++;
+                if (logoClickTimer) clearTimeout(logoClickTimer);
+
+                // Tactile visual feedback on logo click
+                const logo = document.querySelector('.brand-header__logo');
+                if (logo) {
+                    logo.style.transform = 'scale(0.88)';
+                    setTimeout(() => {
+                        logo.style.transform = '';
+                    }, 120);
+                }
+
+                // Generous 2.5s window
+                logoClickTimer = setTimeout(() => {
+                    logoClickCount = 0;
+                }, 2500);
+
+                if (logoClickCount >= 3 || (e && e.detail >= 3)) {
+                    logoClickCount = 0;
+                    if (logoClickTimer) clearTimeout(logoClickTimer);
+                    triggerToggle();
+                }
+            }
+
+            // Global delegated event listener runs immediately (doesn't miss DOMContentLoaded)
+            document.addEventListener('click', function (e) {
+                const target = e.target;
+                if (!target) return;
+                if (target.matches && (target.matches('.brand-header__logo') || target.closest('.brand-header__logo'))) {
+                    handleLogoClick(e);
+                }
+            }, true);
+
+            // Directly ensure logo has pointer cursor and title
+            function setupLogoAttributes() {
+                const logo = document.querySelector('.brand-header__logo');
+                if (logo) {
+                    logo.style.cursor = 'pointer';
+                    logo.style.pointerEvents = 'auto';
+                    logo.setAttribute('title', 'Click 3 times to toggle cloud controls');
+                }
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', setupLogoAttributes);
+            } else {
+                setupLogoAttributes();
+            }
+        })();
+    </script>
+
+    <script type="module" src="/src/supabase-bridge.ts"></script>
 </body>
 
 </html>

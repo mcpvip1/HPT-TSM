@@ -197,7 +197,7 @@ const UploadDialog = {
 
         if (window.CloudStorage && typeof window.CloudStorage.saveDirectReport === 'function') {
             try {
-                Toast.info('☁️ Saving report to Cloud Firestore...');
+                Toast.info('☁️ Saving report to Supabase...');
                 const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
                 const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
                 const temps = this.currentParsed.data.map(d => d.temp);

@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+/* Hide cloud status and auth container by default; only show after clicking logo 3 times */
+#cloudSyncStatus,
+#authContainer,
+#authContainer > #signInBtn {
+  display: none !important;
+}
+
+body.show-cloud-controls #cloudSyncStatus {
+  display: inline-flex !important;
+}
+
+body.show-cloud-controls #authContainer {
+  display: flex !important;
+}
+
+body.show-cloud-controls #authContainer > #signInBtn {
+  display: inline-flex !important;
+}
+
+.brand-header__author {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  margin-top: 2px;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
