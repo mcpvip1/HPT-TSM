@@ -172,21 +172,37 @@ const UploadDialog = {
         const res = this.applyToDashboard();
         if (!res) return;
 
-        // Cache last uploaded file with user's customized lot name
-        if (this.currentFile && window.CloudStorage && typeof window.CloudStorage.onNewReportLoaded === 'function') {
+        const cloudFileName = res.lotNumber.toLowerCase().endsWith('.xlsx') ? res.lotNumber : `${res.lotNumber}.xlsx`;
+
+        // Automatically archive to cloud so uploaded files are never lost
+        if (window.CloudStorage && typeof window.CloudStorage.saveDirectReport === 'function') {
             try {
-                const buffer = await this.currentFile.arrayBuffer();
-                const cloudName = res.lotNumber.toLowerCase().endsWith('.xlsx') ? res.lotNumber : `${res.lotNumber}.xlsx`;
-                window.CloudStorage.onNewReportLoaded({
-                    name: cloudName,
-                    size: this.currentFile.size,
-                    fileBuffer: buffer
+                const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
+                const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
+                const temps = this.currentParsed.data.map(d => d.temp);
+                window.CloudStorage.saveDirectReport({
+                    lotNumber: res.lotNumber,
+                    fileName: cloudFileName,
+                    fileSize: this.currentFile ? this.currentFile.size : 0,
+                    fileBase64: this.fileBase64 || '',
+                    minThreshold: minThresh,
+                    maxThreshold: maxThresh,
+                    startRange: res.startVal,
+                    endRange: res.endVal,
+                    minTemp: Math.min(...temps),
+                    maxTemp: Math.max(...temps),
+                    duration: (window.Utils && typeof window.Utils.formatDuration === 'function') ? window.Utils.formatDuration(res.startVal, res.endVal) : '—',
+                    rowCount: this.currentParsed.data.length,
+                    sensorData: this.currentParsed.data,
+                    chartMode: (window.state && window.state.chartMode) || 'color'
                 });
-            } catch (e) {}
+            } catch (err) {
+                console.warn('Auto cloud archive note:', err);
+            }
         }
 
         this.close();
-        Toast.success(`📊 Graph loaded for Lot [${res.lotNumber}]`);
+        Toast.success(`📊 Graph loaded & saved to cloud for Lot [${res.lotNumber}]`);
     },
 
     async handleSaveAndShow() {

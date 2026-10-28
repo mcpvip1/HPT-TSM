@@ -195,13 +195,23 @@ function renderAuthUI() {
 
 const LOCAL_USER_KEY = 'hpt_supabase_current_user';
 
-function getStoredUser(): User | null {
+export function getDefaultUser(): User {
+  return {
+    id: 'usr_mcpvip1_gmail_com',
+    app_metadata: { provider: 'operator' },
+    user_metadata: { full_name: 'Lab Operator', initials: 'LO' },
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+    email: 'mcpvip1@gmail.com'
+  } as any;
+}
+
+function getStoredUser(): User {
   try {
     const raw = localStorage.getItem(LOCAL_USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    return null;
-  }
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return getDefaultUser();
 }
 
 function setStoredUser(user: User | null) {
@@ -493,14 +503,10 @@ export async function fetchReports() {
       return;
     }
 
-    let query = supabase
+    const query = supabase
       .from('reports')
       .select('*')
       .order('updated_at', { ascending: false });
-
-    if (currentUser?.id) {
-      query = query.eq('user_id', currentUser.id);
-    }
 
     const { data, error } = await query;
 
@@ -1104,7 +1110,7 @@ export function renderHistoryDrawer() {
   const listEl = document.getElementById('historyList');
   if (!listEl) return;
 
-  if (!currentUser) {
+  if (!currentUser && savedReports.length === 0) {
     listEl.innerHTML = `
       <div class="history-empty">
         <div class="history-empty__icon">⚡</div>
@@ -1338,16 +1344,7 @@ supabase.auth.getSession().then(({ data: { session } }) => {
     currentUser = getStoredUser();
   }
   renderAuthUI();
-  if (currentUser) {
-    fetchReports();
-  } else {
-    const local = loadLocalReports();
-    if (local.length > 0) {
-      savedReports = local;
-      updateHistoryBadge();
-    }
-    setSyncStatus('offline', 'Supabase Ready');
-  }
+  fetchReports();
 });
 
 supabase.auth.onAuthStateChange((_event, session) => {

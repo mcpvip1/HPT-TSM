@@ -243,6 +243,12 @@ const App = {
                 Dashboard.showFullResult();
             }
 
+            const firstTime = bestResult.data[0]?.time || '—';
+            const lastTime = bestResult.data[bestResult.data.length - 1]?.time || '—';
+            const duration = (window.Utils && typeof window.Utils.formatDuration === 'function')
+                ? window.Utils.formatDuration(firstTime, lastTime)
+                : '—';
+
             Debug.log(
                 `<strong>Used sheet:</strong> ${bestSheetName}<br>` +
                 `<strong>Parsed rows:</strong> ${bestResult.data.length}<br>` +
@@ -250,7 +256,7 @@ const App = {
                 `<strong>Start:</strong> ${firstTime}<br>` +
                 `<strong>End:</strong> ${lastTime}<br>` +
                 `<strong>Duration:</strong> ${duration || '—'}<br>` +
-                `<strong>Columns:</strong> time=${bestResult._detectedCols.timeCol}, temp=${bestResult._detectedCols.tempCol}<br>` +
+                `<strong>Columns:</strong> time=${bestResult._detectedCols?.timeCol || '—'}, temp=${bestResult._detectedCols?.tempCol || '—'}<br>` +
                 `<strong>All sheets:</strong><br>${debugLines.join('<br>')}`
             );
 
