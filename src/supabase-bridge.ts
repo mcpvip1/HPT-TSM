@@ -73,6 +73,7 @@ let lastUploadedFile: { name: string; size: number; base64: string } | null = nu
 let reportsSubscription: any = null;
 let currentPendingCount = 0;
 export const activeUploadingIds = new Set<string>();
+export const expandedReportIds = new Set<string>();
 let currentHistoryFilterTab: 'all' | 'in-spec' | 'excursions' | 'offline' = 'all';
 
 // UI Elements & Helpers
@@ -409,16 +410,21 @@ function mapDbRowToReport(row: any): SavedReport {
 
   // If sensor_data has points and a range was specified, calculate run min and max strictly within that time range:
   if (sensorData.length > 0 && (startRange || endRange)) {
+    const normStart = startRange ? startRange.replace(/-/g, '/').replace(' ', '_') : '';
+    const normEnd = endRange ? endRange.replace(/-/g, '/').replace(' ', '_') : '';
     const runFiltered = sensorData.filter((d: any) => {
-      if (startRange && d.time < startRange) return false;
-      if (endRange && d.time > endRange) return false;
+      const t = (d.time || '').replace(/-/g, '/').replace(' ', '_');
+      if (normStart && t < normStart) return false;
+      if (normEnd && t > normEnd) return false;
       return true;
     });
     if (runFiltered.length > 0) {
-      const temps = runFiltered.map((d: any) => d.temp);
-      minTemp = parseFloat(Math.min(...temps).toFixed(2));
-      maxTemp = parseFloat(Math.max(...temps).toFixed(2));
-      rowCount = runFiltered.length;
+      const temps = runFiltered.map((d: any) => Number(d.temp)).filter((n: number) => !isNaN(n));
+      if (temps.length > 0) {
+        minTemp = parseFloat(Math.min(...temps).toFixed(2));
+        maxTemp = parseFloat(Math.max(...temps).toFixed(2));
+        rowCount = runFiltered.length;
+      }
     }
   }
 
@@ -1156,6 +1162,45 @@ export async function deleteSelectedReportsFromCloud() {
   }
 }
 
+function formatSavedDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString('en-US', {
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    }
+  } catch (e) {}
+  return dateStr;
+}
+
+function computeRunDuration(start?: string, end?: string, fallback?: string): string {
+  if (start && end) {
+    try {
+      const s = new Date(start.replace(/_/g, ' ').replace(/\//g, '-')).getTime();
+      const e = new Date(end.replace(/_/g, ' ').replace(/\//g, '-')).getTime();
+      if (!isNaN(s) && !isNaN(e) && e > s) {
+        const diffMs = e - s;
+        const totalMinutes = Math.round(diffMs / (1000 * 60));
+        const hours = Math.floor(totalMinutes / 60);
+        const mins = totalMinutes % 60;
+        if (mins > 0) {
+          return `${hours}h ${mins}min`;
+        }
+        return `${hours}h`;
+      }
+    } catch (err) {}
+  }
+  return fallback || '—';
+}
+
 export function renderHistoryDrawer() {
   const listEl = document.getElementById('historyList');
   if (!listEl) return;
@@ -1319,16 +1364,21 @@ export function renderHistoryDrawer() {
     let runPoints = report.rowCount || report.sensorData?.length || 0;
 
     if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
+      const normStart = report.startRange ? report.startRange.replace(/-/g, '/').replace(' ', '_') : '';
+      const normEnd = report.endRange ? report.endRange.replace(/-/g, '/').replace(' ', '_') : '';
       const filteredPts = report.sensorData.filter((d: any) => {
-        if (report.startRange && d.time < report.startRange) return false;
-        if (report.endRange && d.time > report.endRange) return false;
+        const t = (d.time || '').replace(/-/g, '/').replace(' ', '_');
+        if (normStart && t < normStart) return false;
+        if (normEnd && t > normEnd) return false;
         return true;
       });
       if (filteredPts.length > 0) {
-        const temps = filteredPts.map((d: any) => d.temp);
-        runMin = Math.min(...temps);
-        runMax = Math.max(...temps);
-        runPoints = filteredPts.length;
+        const temps = filteredPts.map((d: any) => Number(d.temp)).filter((n: number) => !isNaN(n));
+        if (temps.length > 0) {
+          runMin = parseFloat(Math.min(...temps).toFixed(1));
+          runMax = parseFloat(Math.max(...temps).toFixed(1));
+          runPoints = filteredPts.length;
+        }
       }
     }
 
@@ -1336,9 +1386,8 @@ export function renderHistoryDrawer() {
     const maxDisplay = runMax != null ? `${runMax.toFixed(1)}°C` : '—';
     const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
 
-    const dateFormatted = report.updatedAt 
-      ? new Date(report.updatedAt).toLocaleString() 
-      : (report.startRange || '—');
+    const dateFormatted = formatSavedDate(report.updatedAt || report.createdAt) || (report.startRange || '—');
+    const durationDisplay = computeRunDuration(report.startRange, report.endRange, report.duration);
 
     const isSelected = selectedReportIds.has(report.id);
     const displayName = report.fileName || (report.lotNumber ? `Lot_${report.lotNumber}.xlsx` : 'Sensor_Data.xlsx');
@@ -1361,7 +1410,7 @@ export function renderHistoryDrawer() {
       uploadStatusHtml = `
         <span class="hcard-status-badge hcard-status-badge--queued" title="File saved in local IndexedDB. Will sync when connection is restored.">
           <span class="hcard-dot hcard-dot--amber"></span>
-          <span>Offline Queued</span>
+          <span>Queued</span>
         </span>
       `;
     } else {
@@ -1373,102 +1422,129 @@ export function renderHistoryDrawer() {
       `;
     }
 
+    const isExpanded = expandedReportIds.has(report.id);
+
     return `
-      <div class="history-card ${isSelected ? 'history-card--selected' : ''}" data-id="${report.id}">
-        <!-- Top Row: Checkbox, Identity & File Name with live Uploading indicator -->
-        <div class="hcard-top-row">
-          <label class="hcard-select-wrap" title="Select report" onclick="event.stopPropagation()">
+      <div class="history-card ${isSelected ? 'history-card--selected' : ''} ${isExpanded ? 'history-card--expanded' : ''}" data-id="${report.id}" onclick="window.CloudStorage.handleCardClick(event, '${report.id}')">
+        <!-- Card Header: Compact row shown by default to keep drawer space clean -->
+        <div class="hcard-header">
+          <label class="hcard-checkbox-label" title="Select report" onclick="event.stopPropagation()">
             <input type="checkbox" class="history-card-checkbox" data-id="${report.id}" ${isSelected ? 'checked' : ''}>
           </label>
 
-          <div class="hcard-identity-box">
-            <div class="hcard-title-line">
-              <span class="hcard-file-icon">📄</span>
-              <strong class="hcard-file-name truncate" title="${displayName}">${displayName}</strong>
-              <!-- Status indicator rendered directly beside file name -->
-              ${uploadStatusHtml}
+          <div class="hcard-header-main">
+            <div class="hcard-title-row">
+              <div class="hcard-title-left">
+                <svg class="hcard-file-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="8" y1="13" x2="16" y2="13"/>
+                  <line x1="8" y1="17" x2="16" y2="17"/>
+                </svg>
+                <strong class="hcard-file-name" title="${displayName}">${displayName}</strong>
+              </div>
+
+              <div class="hcard-title-right">
+                ${uploadStatusHtml}
+                <button id="hexpand-btn-${report.id}" class="hcard-expand-btn" aria-label="${isExpanded ? 'Collapse' : 'Expand full details'}" title="${isExpanded ? 'Click to collapse' : 'Click to show full report details'}" onclick="event.stopPropagation(); window.CloudStorage.toggleCardExpansion('${report.id}')">
+                  <svg id="hchevron-${report.id}" class="hcard-chevron ${isExpanded ? 'is-expanded' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+              </div>
             </div>
 
-            <div class="hcard-meta-line">
+            <div class="hcard-sub-row">
               <span class="hcard-lot-badge">Lot: ${report.lotNumber || '—'}</span>
-              <span class="hcard-sep">·</span>
               <span class="hcard-date-meta">Saved ${dateFormatted}</span>
             </div>
           </div>
         </div>
 
-        <!-- Telemetry Panel: Calibrated Run Time Range & Min/Max Temperatures -->
-        <div class="hcard-telemetry">
-          <!-- Time Range Strip -->
-          <div class="hcard-range-line">
-            <div class="hcard-range-left">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" class="hcard-range-icon">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-              <span class="hcard-range-text">${report.startRange || '—'} → ${report.endRange || '—'}</span>
+        <!-- Full Body: Expands smoothly on click to show telemetry & actions -->
+        <div id="hdetails-${report.id}" class="hcard-full-body" style="display:${isExpanded ? 'flex' : 'none'};">
+          <!-- Precision Run Telemetry Box -->
+          <div class="hcard-telemetry">
+            <!-- Time Range & Duration / Points line -->
+            <div class="hcard-range-line">
+              <div class="hcard-range-left">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" class="hcard-range-icon">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span class="hcard-range-text">${report.startRange || '—'} → ${report.endRange || '—'}</span>
+              </div>
+              <div class="hcard-range-stats">
+                <span>${durationDisplay}</span>
+                <span class="hcard-sep">·</span>
+                <span>${runPoints} pts</span>
+              </div>
             </div>
-            <div class="hcard-range-stats">
-              <span>${report.duration || '—'}</span>
-              <span class="hcard-sep">·</span>
-              <span>${runPoints} pts</span>
-            </div>
-          </div>
 
-          <!-- Min/Max Readouts: Min. temp. this run / Max. temp. this run -->
-          <div class="hcard-temp-grid">
-            <div class="hcard-temp-cell">
-              <span class="hcard-temp-label">Min. temp. this run:</span>
-              <span class="hcard-temp-val tabular-nums ${runMin != null && runMin < minThreshold ? 'hcard-temp-val--excursion' : ''}">
-                ${minDisplay}
+            <!-- Min & Max Temperature side-by-side cards -->
+            <div class="hcard-temp-grid">
+              <div class="hcard-temp-cell">
+                <span class="hcard-temp-label">MIN. TEMP. THIS RUN:</span>
+                <span class="hcard-temp-val tabular-nums ${runMin != null && runMin < minThreshold ? 'hcard-temp-val--excursion' : ''}">
+                  ${minDisplay}
+                </span>
+              </div>
+              <div class="hcard-temp-cell">
+                <span class="hcard-temp-label">MAX. TEMP. THIS RUN:</span>
+                <span class="hcard-temp-val tabular-nums ${runMax != null && runMax > maxThreshold ? 'hcard-temp-val--excursion' : ''}">
+                  ${maxDisplay}
+                </span>
+              </div>
+            </div>
+
+            <!-- Acceptance Criteria Strip -->
+            <div class="hcard-compliance-bar ${isExcursion ? 'hcard-compliance-bar--warn' : 'hcard-compliance-bar--ok'}">
+              <span class="hcard-compliance-dot">●</span>
+              <span>
+                ${isExcursion 
+                  ? `Excursion Detected: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C` 
+                  : `In-Spec Acceptance Criteria: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C`
+                }
               </span>
             </div>
-            <div class="hcard-temp-cell">
-              <span class="hcard-temp-label">Max. temp. this run:</span>
-              <span class="hcard-temp-val tabular-nums ${runMax != null && runMax > maxThreshold ? 'hcard-temp-val--excursion' : ''}">
-                ${maxDisplay}
-              </span>
+          </div>
+
+          <!-- Action Buttons Footer -->
+          <div class="hcard-footer">
+            <button class="hcard-load-btn" onclick="event.stopPropagation(); window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span>Load Graph</span>
+            </button>
+
+            <div class="hcard-footer-right">
+              <button class="hcard-btn-sec" onclick="event.stopPropagation(); window.CloudStorage.downloadExcel('${report.id}')" title="Download Excel (.xlsx)">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="8" y1="13" x2="16" y2="13"/>
+                  <line x1="8" y1="17" x2="16" y2="17"/>
+                </svg>
+                <span>.XLSX</span>
+              </button>
+
+              <button class="hcard-btn-sec" onclick="event.stopPropagation(); window.CloudStorage.downloadPdf('${report.id}')" title="Download PDF Report">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="9" y1="15" x2="15" y2="15"/>
+                </svg>
+                <span>PDF</span>
+              </button>
+
+              <button class="hcard-del-btn" onclick="event.stopPropagation(); window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber || ''}')" title="Delete report from Supabase Cloud">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>
+                </svg>
+              </button>
             </div>
-          </div>
-
-          <!-- Compliance Indicator -->
-          <div class="hcard-compliance-bar ${isExcursion ? 'hcard-compliance-bar--warn' : 'hcard-compliance-bar--ok'}">
-            <span>${isExcursion ? '▲' : '●'}</span>
-            <span>
-              ${isExcursion 
-                ? `Excursion Detected (Spec: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C)` 
-                : `In-Spec Acceptance Criteria: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C`
-              }
-            </span>
-          </div>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="hcard-action-bar">
-          <button class="hcard-load-btn" onclick="window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-            </svg>
-            <span>Load Graph</span>
-          </button>
-
-          <div class="hcard-action-icons">
-            <button class="hcard-btn-sec" onclick="window.CloudStorage.downloadExcel('${report.id}')" title="Download Excel (.xlsx)">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>
-              </svg>
-              <span>.XLSX</span>
-            </button>
-            <button class="hcard-btn-sec" onclick="window.CloudStorage.downloadPdf('${report.id}')" title="Download PDF Report">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/>
-              </svg>
-              <span>PDF</span>
-            </button>
-            <button class="hcard-del-btn" onclick="window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber || ''}')" title="Delete report from Supabase Cloud">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>
-              </svg>
-            </button>
           </div>
         </div>
       </div>
@@ -1499,6 +1575,48 @@ export function renderHistoryDrawer() {
   updateBulkBarUI(filtered);
 }
 
+export function handleCardClick(event: MouseEvent, id: string) {
+  const target = event.target as HTMLElement;
+  if (!target) return;
+  // If clicked an interactive control or inside footer, do not toggle accordion
+  if (
+    target.closest('input') ||
+    target.closest('button') ||
+    target.closest('label') ||
+    target.closest('.hcard-footer') ||
+    target.closest('.hcard-telemetry')
+  ) {
+    return;
+  }
+  toggleCardExpansion(id);
+}
+
+export function toggleCardExpansion(id: string) {
+  if (expandedReportIds.has(id)) {
+    expandedReportIds.delete(id);
+  } else {
+    expandedReportIds.add(id);
+  }
+
+  const card = document.querySelector(`.history-card[data-id="${id}"]`);
+  const details = document.getElementById(`hdetails-${id}`);
+  const chevron = document.getElementById(`hchevron-${id}`);
+  const expandBtn = document.getElementById(`hexpand-btn-${id}`);
+
+  if (details) {
+    const isNowExpanded = expandedReportIds.has(id);
+    details.style.display = isNowExpanded ? 'flex' : 'none';
+    card?.classList.toggle('history-card--expanded', isNowExpanded);
+    if (chevron) {
+      chevron.classList.toggle('is-expanded', isNowExpanded);
+    }
+    if (expandBtn) {
+      expandBtn.setAttribute('title', isNowExpanded ? 'Click to collapse' : 'Click to show full report details');
+      expandBtn.setAttribute('aria-label', isNowExpanded ? 'Collapse' : 'Expand full details');
+    }
+  }
+}
+
 export function toggleHistoryDrawer(forceState?: boolean) {
   const drawer = document.getElementById('historyDrawer');
   const backdrop = document.getElementById('historyBackdrop');
@@ -1524,14 +1642,9 @@ export function toggleHistoryDrawer(forceState?: boolean) {
   saveCurrentReport: () => saveCurrentReportToCloud(false),
   saveDirectReport: saveDirectReport,
   toggleHistory: toggleHistoryDrawer,
-  toggleDetails: (id: string) => {
-    const el = document.getElementById(`hdetails-${id}`);
-    const lbl = document.getElementById(`details-lbl-${id}`);
-    if (!el) return;
-    const isHidden = el.style.display === 'none';
-    el.style.display = isHidden ? 'block' : 'none';
-    if (lbl) lbl.textContent = isHidden ? 'Details ▴' : 'Details ▾';
-  },
+  toggleCardExpansion: toggleCardExpansion,
+  toggleDetails: toggleCardExpansion,
+  handleCardClick: handleCardClick,
   loadReport: (id: string) => {
     const report = savedReports.find(r => r.id === id);
     if (report) loadReportIntoApp(report);

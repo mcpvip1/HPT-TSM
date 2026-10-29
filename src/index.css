@@ -28,11 +28,11 @@ body.show-cloud-controls #authContainer > #signInBtn {
 }
 
 /* ================================================================
-   Modern Clean Redesign: History Drawer, Cards & Telemetry
+   Modern Clean Redesign: History Drawer, Compact Cards & Telemetry
    ================================================================ */
 
 .history-drawer {
-  width: 480px !important;
+  width: 490px !important;
   max-width: 100vw !important;
 }
 
@@ -48,7 +48,7 @@ body.show-cloud-controls #authContainer > #signInBtn {
 }
 
 .hfilter-tab {
-  padding: 5px 10px;
+  padding: 5px 11px;
   font-size: 11.5px;
   font-weight: 600;
   border-radius: 6px;
@@ -59,7 +59,7 @@ body.show-cloud-controls #authContainer > #signInBtn {
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .hfilter-tab:hover {
@@ -75,115 +75,148 @@ body.show-cloud-controls #authContainer > #signInBtn {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+/* ================================================================
+   History Card: Compact by Default for Space Cleanliness,
+   Expands to Full View on Click
+   ================================================================ */
+
 .history-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-light, #e2e8f0);
+  border-radius: 14px;
   padding: 14px 16px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
+  cursor: pointer;
+  user-select: none;
 }
 
 .history-card:hover {
   border-color: var(--accent-light, #6366f1);
-  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 18px -4px rgba(0, 0, 0, 0.08);
 }
 
 .history-card--selected {
   border-color: var(--accent, #4f46e5);
-  background: rgba(79, 70, 229, 0.03);
+  background: rgba(79, 70, 229, 0.02);
 }
 
-/* Card Header Zone */
-.hcard-top-row {
+.history-card--expanded {
+  border-color: var(--accent-light, #6366f1);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.09);
+  cursor: default;
+}
+
+/* Header Row */
+.hcard-header {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
+  width: 100%;
 }
 
-.hcard-select-wrap {
+.hcard-checkbox-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding-top: 2px;
   cursor: pointer;
 }
 
-.hcard-identity-box {
+.history-card-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border, #cbd5e1);
+  accent-color: var(--accent, #4f46e5);
+  cursor: pointer;
+}
+
+.hcard-header-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
-.hcard-title-line {
+.hcard-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hcard-title-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
 }
 
 .hcard-file-icon {
-  font-size: 13px;
+  color: #6366f1;
   flex-shrink: 0;
 }
 
 .hcard-file-name {
   font-family: var(--font-mono, monospace);
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text-primary, #1e293b);
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Live Uploading & Sync Status Badge Beside File Name */
+.hcard-title-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Status Badges */
 .hcard-status-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   font-family: var(--font-mono, monospace);
-  padding: 1.5px 7px;
-  border-radius: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
   white-space: nowrap;
-  flex-shrink: 0;
   user-select: none;
 }
 
 .hcard-status-badge--uploading {
   color: #2563eb;
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.25);
-  animation: pulseUploading 2s infinite ease-in-out;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  animation: hcardPulse 1.8s infinite ease-in-out;
 }
 
-@keyframes pulseUploading {
+@keyframes hcardPulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.hcard-status-badge--queued {
-  color: #d97706;
-  background: rgba(217, 119, 6, 0.08);
-  border: 1px solid rgba(217, 119, 6, 0.25);
+  50% { opacity: 0.65; }
 }
 
 .hcard-status-badge--synced {
   color: #059669;
-  background: rgba(5, 150, 105, 0.08);
-  border: 1px solid rgba(5, 150, 105, 0.2);
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
 }
 
-.hcard-spinner {
-  animation: hcardSpin 0.9s linear infinite;
-  display: inline-block;
-}
-
-@keyframes hcardSpin {
-  100% { transform: rotate(360deg); }
+.hcard-status-badge--queued {
+  color: #d97706;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
 }
 
 .hcard-dot {
@@ -193,56 +226,123 @@ body.show-cloud-controls #authContainer > #signInBtn {
   display: inline-block;
 }
 
-.hcard-dot--amber {
-  background: #f59e0b;
-}
-
 .hcard-dot--emerald {
   background: #10b981;
 }
 
-/* Card Subtitle (Lot & Date) */
-.hcard-meta-line {
+.hcard-dot--amber {
+  background: #f59e0b;
+}
+
+.hcard-spinner {
+  animation: hcardSpin 0.85s linear infinite;
+  display: inline-block;
+}
+
+@keyframes hcardSpin {
+  100% { transform: rotate(360deg); }
+}
+
+/* Chevron Expand/Collapse Affordance */
+.hcard-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.hcard-expand-btn:hover {
+  background: var(--bg-surface-alt, #f8fafc);
+  color: var(--text-primary, #1e293b);
+  border-color: var(--border-light, #e2e8f0);
+}
+
+.hcard-chevron {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hcard-chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+/* Sub-row: Lot number and saved date */
+.hcard-sub-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 11.5px;
-  color: var(--text-muted);
+  color: var(--text-muted, #64748b);
+  flex-wrap: wrap;
 }
 
 .hcard-lot-badge {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
-  padding: 1px 6px;
-  border-radius: 4px;
+  color: #4338ca;
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+  padding: 1.5px 7px;
+  border-radius: 5px;
+  letter-spacing: -0.01em;
 }
 
-.hcard-sep {
-  color: var(--text-faint);
+.hcard-date-meta {
+  color: var(--text-muted, #64748b);
+  font-size: 11.5px;
+}
+
+/* ================================================================
+   Full Collapsible Body (Smooth Reveal Animation)
+   ================================================================ */
+
+.hcard-full-body {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: hcardSlideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: default;
+}
+
+@keyframes hcardSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Precision Telemetry Panel */
 .hcard-telemetry {
-  background: var(--bg-surface-alt);
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: var(--bg-surface-alt, #f8fafc);
+  border: 1px solid var(--border-light, #e2e8f0);
+  border-radius: 10px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .hcard-range-line {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  font-size: 11px;
-  border-bottom: 1px solid var(--border-light);
-  padding-bottom: 7px;
+  gap: 8px;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border-light, #e2e8f0);
+  padding-bottom: 9px;
 }
 
 .hcard-range-left {
@@ -253,116 +353,128 @@ body.show-cloud-controls #authContainer > #signInBtn {
 }
 
 .hcard-range-icon {
-  color: var(--text-muted);
+  color: var(--text-muted, #64748b);
   flex-shrink: 0;
 }
 
 .hcard-range-text {
   font-family: var(--font-mono, monospace);
-  font-weight: 600;
-  color: var(--text-primary);
+  font-weight: 700;
+  color: var(--text-primary, #1e293b);
   letter-spacing: -0.01em;
+  font-size: 11.5px;
 }
 
 .hcard-range-stats {
   font-family: var(--font-mono, monospace);
-  color: var(--text-muted);
+  color: var(--text-muted, #64748b);
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 11.5px;
+}
+
+.hcard-sep {
+  color: var(--text-faint, #cbd5e1);
+  margin: 0 2px;
 }
 
 /* Min/Max Telemetry Grid */
 .hcard-temp-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
 }
 
 .hcard-temp-cell {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  padding: 6px 10px;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-light, #e2e8f0);
+  border-radius: 8px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .hcard-temp-label {
   font-size: 10px;
   font-family: var(--font-mono, monospace);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #64748b);
+  font-weight: 600;
 }
 
 .hcard-temp-val {
-  font-size: 14.5px;
+  font-size: 18px;
   font-weight: 700;
   font-family: var(--font-mono, monospace);
   font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
+  color: var(--text-primary, #1e293b);
 }
 
 .hcard-temp-val--excursion {
   color: #dc2626;
 }
 
-/* Compliance Status Strip */
+/* Acceptance Criteria Bar */
 .hcard-compliance-bar {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
 }
 
 .hcard-compliance-bar--ok {
-  background: rgba(16, 185, 129, 0.08);
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
 }
 
 .hcard-compliance-bar--warn {
-  background: rgba(245, 158, 11, 0.08);
-  color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
 }
 
-/* Action Buttons Strip */
-.hcard-action-bar {
+.hcard-compliance-dot {
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Action Buttons Footer */
+.hcard-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 .hcard-load-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: var(--accent);
+  gap: 7px;
+  background: #4f46e5;
   color: #ffffff;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: 1px solid transparent;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
   cursor: pointer;
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);
 }
 
 .hcard-load-btn:hover {
-  background: var(--accent-light);
+  background: #4338ca;
   transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
 }
 
-.hcard-action-icons {
+.hcard-footer-right {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -371,40 +483,117 @@ body.show-cloud-controls #authContainer > #signInBtn {
 .hcard-btn-sec {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: var(--bg-surface-alt);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  font-size: 11px;
+  gap: 5px;
+  background: var(--bg-surface, #ffffff);
+  color: var(--text-secondary, #475569);
+  border: 1px solid var(--border, #cbd5e1);
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 5px 8px;
-  border-radius: 6px;
+  padding: 7px 11px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .hcard-btn-sec:hover {
-  background: var(--bg-surface-soft);
-  color: var(--text-primary);
-  border-color: var(--border-light);
+  background: var(--bg-surface-alt, #f8fafc);
+  color: var(--text-primary, #1e293b);
+  border-color: var(--accent-light, #6366f1);
 }
 
 .hcard-del-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-muted, #64748b);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .hcard-del-btn:hover {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.2);
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+/* ================================================================
+   Dark Mode Theme Overrides
+   ================================================================ */
+
+[data-theme="dark"] .history-card,
+html.dark .history-card,
+body.dark .history-card {
+  background: #111827;
+  border-color: #1f2937;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .history-card:hover,
+html.dark .history-card:hover,
+body.dark .history-card:hover {
+  border-color: #6366f1;
+}
+
+[data-theme="dark"] .hcard-lot-badge,
+html.dark .hcard-lot-badge,
+body.dark .hcard-lot-badge {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+[data-theme="dark"] .hcard-telemetry,
+html.dark .hcard-telemetry,
+body.dark .hcard-telemetry {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .hcard-range-line,
+html.dark .hcard-range-line,
+body.dark .hcard-range-line {
+  border-color: #334155;
+}
+
+[data-theme="dark"] .hcard-temp-cell,
+html.dark .hcard-temp-cell,
+body.dark .hcard-temp-cell {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+[data-theme="dark"] .hcard-compliance-bar--ok,
+html.dark .hcard-compliance-bar--ok,
+body.dark .hcard-compliance-bar--ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+[data-theme="dark"] .hcard-compliance-bar--warn,
+html.dark .hcard-compliance-bar--warn,
+body.dark .hcard-compliance-bar--warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+[data-theme="dark"] .hcard-btn-sec,
+html.dark .hcard-btn-sec,
+body.dark .hcard-btn-sec {
+  background: #1e293b;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .hcard-btn-sec:hover,
+html.dark .hcard-btn-sec:hover,
+body.dark .hcard-btn-sec:hover {
+  background: #334155;
+  color: #f1f5f9;
 }
