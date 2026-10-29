@@ -482,13 +482,21 @@
             </div>
         </div>
 
+        <!-- Filter Segmented Tabs -->
+        <div id="historyFilterTabs" class="history-drawer__filter-strip">
+            <button class="hfilter-tab is-active" data-filter="all">All (<span id="filterCountAll">0</span>)</button>
+            <button class="hfilter-tab" data-filter="in-spec">In-Spec (<span id="filterCountInSpec">0</span>)</button>
+            <button class="hfilter-tab" data-filter="excursions">Excursions (<span id="filterCountExcursions">0</span>)</button>
+            <button class="hfilter-tab" data-filter="offline" id="filterTabOffline" style="display:none;">Offline (<span id="filterCountOffline">0</span>)</button>
+        </div>
+
         <div id="historyBulkBar" class="history-bulk-bar" style="display:none;">
             <label class="history-select-all-label" title="Select or deselect all visible reports">
                 <input type="checkbox" id="historySelectAllCheckbox" class="history-checkbox">
                 <span id="historySelectCountText">Select All (0)</span>
             </label>
             <div class="history-bulk-actions">
-                <button id="historyBulkDeleteBtn" class="history-bulk-delete-btn" disabled title="Delete selected reports from Cloud Firestore">
+                <button id="historyBulkDeleteBtn" class="history-bulk-delete-btn" disabled title="Delete selected reports from Supabase Cloud">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
                     </svg>
@@ -499,14 +507,14 @@
 
         <div class="history-drawer__content">
             <div id="historyList" class="history-list">
-                <!-- Dynamically populated by firebase-bridge.ts -->
+                <!-- Dynamically populated by supabase-bridge.ts -->
             </div>
         </div>
 
         <div class="history-drawer__footer">
             <div class="drawer-footer-sync">
                 <span class="pulse-dot"></span>
-                <span>Real-time Firestore Sync Active</span>
+                <span id="drawerSyncFooterText">Supabase Real-time Cloud Active</span>
             </div>
         </div>
     </aside>

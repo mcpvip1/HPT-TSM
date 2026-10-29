@@ -163,16 +163,22 @@ const QueueManager = {
 
             const firstTime = bestResult.data[0].time;
             const lastTime = bestResult.data[bestResult.data.length - 1].time;
-            item.duration = Utils.formatDuration(firstTime, lastTime) || '—';
+            const runStart = bestResult.start || firstTime;
+            const runEnd = bestResult.end || lastTime;
+            item.duration = Utils.formatDuration(runStart, runEnd) || '—';
 
-            const temps = bestResult.data.map(d => d.temp);
-            item.minTemp = Math.min(...temps);
-            item.maxTemp = Math.max(...temps);
+            // Filter points strictly to the run range
+            const runFiltered = bestResult.data.filter(d => (!runStart || d.time >= runStart) && (!runEnd || d.time <= runEnd));
+            const targetPoints = runFiltered.length > 0 ? runFiltered : bestResult.data;
+            const temps = targetPoints.map(d => d.temp);
+            item.minTemp = temps.length ? Math.min(...temps) : 0;
+            item.maxTemp = temps.length ? Math.max(...temps) : 0;
+            item.rowCount = targetPoints.length;
 
             const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
             const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
-            const inRange = bestResult.data.filter(d => d.temp >= minThresh && d.temp <= maxThresh).length;
-            item.compliancePct = parseFloat(((inRange / bestResult.data.length) * 100).toFixed(1));
+            const inRange = targetPoints.filter(d => d.temp >= minThresh && d.temp <= maxThresh).length;
+            item.compliancePct = parseFloat(((inRange / targetPoints.length) * 100).toFixed(1));
 
             // 3. Attempt direct save to Cloud Firestore with Lot Number as filename
             if (window.CloudStorage && typeof window.CloudStorage.saveDirectReport === 'function') {

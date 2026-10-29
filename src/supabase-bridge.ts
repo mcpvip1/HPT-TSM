@@ -6,6 +6,7 @@
  * PostgreSQL reports storage, real-time sync, and authentication.
  */
 
+import './index.css';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import {
   enqueuePendingReport,
@@ -59,6 +60,7 @@ export interface SavedReport {
   createdAt?: string;
   updatedAt?: string;
   isOfflinePending?: boolean;
+  isUploading?: boolean;
 }
 
 const LOCAL_STORAGE_REPORTS_KEY = 'hpt_supabase_saved_reports';
@@ -70,6 +72,8 @@ let isSigningIn = false;
 let lastUploadedFile: { name: string; size: number; base64: string } | null = null;
 let reportsSubscription: any = null;
 let currentPendingCount = 0;
+export const activeUploadingIds = new Set<string>();
+let currentHistoryFilterTab: 'all' | 'in-spec' | 'excursions' | 'offline' = 'all';
 
 // UI Elements & Helpers
 function setSyncStatus(status: 'synced' | 'syncing' | 'offline' | 'saved' | 'queued', text?: string) {
@@ -396,6 +400,28 @@ async function handleSignOut() {
 
 // Map between Supabase column names and frontend SavedReport model
 function mapDbRowToReport(row: any): SavedReport {
+  let minTemp = row.min_temp != null ? Number(row.min_temp) : undefined;
+  let maxTemp = row.max_temp != null ? Number(row.max_temp) : undefined;
+  let rowCount = row.row_count || 0;
+  const sensorData = row.sensor_data || [];
+  const startRange = row.start_range || '';
+  const endRange = row.end_range || '';
+
+  // If sensor_data has points and a range was specified, calculate run min and max strictly within that time range:
+  if (sensorData.length > 0 && (startRange || endRange)) {
+    const runFiltered = sensorData.filter((d: any) => {
+      if (startRange && d.time < startRange) return false;
+      if (endRange && d.time > endRange) return false;
+      return true;
+    });
+    if (runFiltered.length > 0) {
+      const temps = runFiltered.map((d: any) => d.temp);
+      minTemp = parseFloat(Math.min(...temps).toFixed(2));
+      maxTemp = parseFloat(Math.max(...temps).toFixed(2));
+      rowCount = runFiltered.length;
+    }
+  }
+
   return {
     id: row.id,
     lotNumber: row.lot_number || '',
@@ -405,19 +431,20 @@ function mapDbRowToReport(row: any): SavedReport {
     pdfBase64: row.pdf_base64 || '',
     minThreshold: Number(row.min_threshold ?? 35.0),
     maxThreshold: Number(row.max_threshold ?? 39.0),
-    startRange: row.start_range || '',
-    endRange: row.end_range || '',
-    minTemp: row.min_temp != null ? Number(row.min_temp) : undefined,
-    maxTemp: row.max_temp != null ? Number(row.max_temp) : undefined,
+    startRange,
+    endRange,
+    minTemp,
+    maxTemp,
     duration: row.duration || '',
-    rowCount: row.row_count || 0,
-    sensorData: row.sensor_data || [],
+    rowCount,
+    sensorData,
     chartMode: row.chart_mode || 'color',
     userId: row.user_id || '',
     userEmail: row.user_email || '',
     userDisplayName: row.user_display_name || '',
     createdAt: row.created_at || '',
-    updatedAt: row.updated_at || ''
+    updatedAt: row.updated_at || '',
+    isUploading: activeUploadingIds.has(row.id)
   };
 }
 
@@ -568,6 +595,9 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
 
   setSyncStatus('syncing', 'Saving to Supabase...');
 
+  const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  activeUploadingIds.add(reportId);
+
   try {
     const lotInput = (document.getElementById('lotNumberInput') as HTMLInputElement)?.value.trim() || state.lotNumber || 'EXT-UNKNOWN';
     const cloudFileName = lotInput.toLowerCase().endsWith('.xlsx') ? lotInput : `${lotInput}.xlsx`;
@@ -577,7 +607,14 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
     const endRange = (window as any).Dashboard?.readEnd() || (state.sensorData[state.sensorData.length - 1]?.time || '');
     const duration = (document.getElementById('footerDurationVal')?.textContent || '').trim() || (window as any).Utils?.formatDuration(startRange, endRange) || '—';
     
-    const temps = state.sensorData.map((d: any) => d.temp);
+    // Filter strictly to the confirmed run time range so min/max is saved as is for this run
+    const runPoints = state.sensorData.filter((d: any) => {
+      if (startRange && d.time < startRange) return false;
+      if (endRange && d.time > endRange) return false;
+      return true;
+    });
+    const targetData = runPoints.length > 0 ? runPoints : state.sensorData;
+    const temps = targetData.map((d: any) => d.temp);
     const minTemp = temps.length ? Math.min(...temps) : 0;
     const maxTemp = temps.length ? Math.max(...temps) : 0;
 
@@ -599,7 +636,6 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
       console.warn('PDF generation for cloud payload skipped or failed:', pdfErr);
     }
 
-    const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const sampleData = state.sensorData.length > 3000
       ? state.sensorData.filter((_: any, idx: number) => idx % Math.ceil(state.sensorData.length / 2000) === 0)
       : state.sensorData;
@@ -618,28 +654,34 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
       minTemp: parseFloat(minTemp.toFixed(2)),
       maxTemp: parseFloat(maxTemp.toFixed(2)),
       duration,
-      rowCount: state.sensorData.length,
+      rowCount: targetData.length,
       sensorData: sampleData,
       chartMode: state.chartMode || 'color',
       userId: user.id,
       userEmail: user.email || '',
       userDisplayName: user.user_metadata?.full_name || '',
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      isUploading: true
     };
+
+    // Update local state and trigger history UI so uploading indicator is visible
+    const existingIndex = savedReports.findIndex(r => r.lotNumber === lotInput);
+    if (existingIndex >= 0) {
+      savedReports[existingIndex] = payload;
+    } else {
+      savedReports.unshift(payload);
+    }
+    saveLocalReports(savedReports);
+    renderHistoryDrawer();
+    updateHistoryBadge();
 
     // If offline, enqueue directly to IndexedDB
     if (!isOnline()) {
       payload.isOfflinePending = true;
-      const existingIndex = savedReports.findIndex(r => r.lotNumber === lotInput);
-      if (existingIndex >= 0) {
-        savedReports[existingIndex] = payload;
-      } else {
-        savedReports.unshift(payload);
-      }
-      saveLocalReports(savedReports);
+      payload.isUploading = false;
+      activeUploadingIds.delete(reportId);
       renderHistoryDrawer();
-      updateHistoryBadge();
 
       await enqueuePendingReport({
         ...payload,
@@ -654,17 +696,6 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
       (window as any).Toast?.info(`💾 Saved Lot [${lotInput}] to IndexedDB. Will sync when back online.`);
       return;
     }
-
-    // Update local state immediately
-    const existingIndex = savedReports.findIndex(r => r.lotNumber === lotInput);
-    if (existingIndex >= 0) {
-      savedReports[existingIndex] = payload;
-    } else {
-      savedReports.unshift(payload);
-    }
-    saveLocalReports(savedReports);
-    renderHistoryDrawer();
-    updateHistoryBadge();
 
     // Persist to Supabase
     try {
@@ -684,7 +715,6 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
         } as OfflineQueuedReport);
         currentPendingCount = await getPendingCount();
         setSyncStatus('queued', `Queued (${currentPendingCount} pending)`);
-        renderHistoryDrawer();
         (window as any).Toast?.warning(`📡 Network issue: Saved Lot [${lotInput}] to IndexedDB queue.`);
       } else {
         setSyncStatus('saved', `Saved Lot: ${lotInput} (Supabase)`);
@@ -707,13 +737,17 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
       } as OfflineQueuedReport);
       currentPendingCount = await getPendingCount();
       setSyncStatus('queued', `Queued (${currentPendingCount} pending)`);
-      renderHistoryDrawer();
       (window as any).Toast?.warning(`📡 Offline: Saved Lot [${lotInput}] to local IndexedDB.`);
     }
   } catch (error: any) {
     setSyncStatus('offline', 'Save failed');
     console.error('Supabase save error:', error);
     (window as any).Toast?.error('Failed to save: ' + (error.message || 'Unknown error'));
+  } finally {
+    activeUploadingIds.delete(reportId);
+    const reportItem = savedReports.find(r => r.id === reportId);
+    if (reportItem) reportItem.isUploading = false;
+    renderHistoryDrawer();
   }
 }
 
@@ -729,25 +763,50 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
   currentUser = user;
 
   setSyncStatus('syncing', 'Saving...');
+  
+  if (!report.id) {
+    report.id = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  }
+  const reportId = report.id;
+  activeUploadingIds.add(reportId);
+  report.isUploading = true;
+
   try {
-    if (!report.id) {
-      report.id = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    }
     report.userId = user.id;
     report.updatedAt = new Date().toISOString();
+
+    // Ensure run min/max is strictly within the run time range
+    if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
+      const runFiltered = report.sensorData.filter((d: any) => {
+        if (report.startRange && d.time < report.startRange) return false;
+        if (report.endRange && d.time > report.endRange) return false;
+        return true;
+      });
+      if (runFiltered.length > 0) {
+        const runTemps = runFiltered.map((d: any) => d.temp);
+        report.minTemp = parseFloat(Math.min(...runTemps).toFixed(2));
+        report.maxTemp = parseFloat(Math.max(...runTemps).toFixed(2));
+        report.rowCount = runFiltered.length;
+      }
+    }
     
+    // Update local cache immediately so user sees uploading status beside file name
+    const existingIndex = savedReports.findIndex(r => r.id === report.id || r.lotNumber === report.lotNumber);
+    if (existingIndex >= 0) {
+      savedReports[existingIndex] = report;
+    } else {
+      savedReports.unshift(report);
+    }
+    saveLocalReports(savedReports);
+    renderHistoryDrawer();
+    updateHistoryBadge();
+
     // Check if offline
     if (!isOnline()) {
       report.isOfflinePending = true;
-      const existingIndex = savedReports.findIndex(r => r.id === report.id || r.lotNumber === report.lotNumber);
-      if (existingIndex >= 0) {
-        savedReports[existingIndex] = report;
-      } else {
-        savedReports.unshift(report);
-      }
-      saveLocalReports(savedReports);
+      report.isUploading = false;
+      activeUploadingIds.delete(reportId);
       renderHistoryDrawer();
-      updateHistoryBadge();
 
       await enqueuePendingReport({
         ...report,
@@ -762,16 +821,6 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
       (window as any).Toast?.info(`💾 Saved Lot [${report.lotNumber}] to IndexedDB. Will sync when connection is restored.`);
       return true;
     }
-
-    const existingIndex = savedReports.findIndex(r => r.id === report.id || r.lotNumber === report.lotNumber);
-    if (existingIndex >= 0) {
-      savedReports[existingIndex] = report;
-    } else {
-      savedReports.unshift(report);
-    }
-    saveLocalReports(savedReports);
-    renderHistoryDrawer();
-    updateHistoryBadge();
 
     try {
       const dbRow = mapReportToDbRow(report, user.id);
@@ -790,7 +839,6 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
         } as OfflineQueuedReport);
         currentPendingCount = await getPendingCount();
         setSyncStatus('queued', `Queued (${currentPendingCount} pending)`);
-        renderHistoryDrawer();
         (window as any).Toast?.warning(`📡 Network issue: Lot [${report.lotNumber}] saved to IndexedDB queue.`);
       } else {
         setSyncStatus('saved', `Saved Lot: ${report.lotNumber}`);
@@ -809,7 +857,6 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
       } as OfflineQueuedReport);
       currentPendingCount = await getPendingCount();
       setSyncStatus('queued', `Queued (${currentPendingCount} pending)`);
-      renderHistoryDrawer();
       (window as any).Toast?.info(`💾 Saved Lot [${report.lotNumber}] to IndexedDB.`);
     }
 
@@ -827,9 +874,12 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
     } as OfflineQueuedReport);
     currentPendingCount = await getPendingCount();
     setSyncStatus('queued', `Saved Offline (${currentPendingCount} pending)`);
-    renderHistoryDrawer();
     (window as any).Toast?.info(`💾 Saved Lot [${report.lotNumber}] to IndexedDB.`);
     return true;
+  } finally {
+    activeUploadingIds.delete(reportId);
+    report.isUploading = false;
+    renderHistoryDrawer();
   }
 }
 
@@ -1110,6 +1160,74 @@ export function renderHistoryDrawer() {
   const listEl = document.getElementById('historyList');
   if (!listEl) return;
 
+  // Update filter tabs counts
+  const totalCount = savedReports.length;
+  let inSpecCount = 0;
+  let excursionCount = 0;
+  let offlinePendingCount = 0;
+
+  savedReports.forEach(r => {
+    if (r.isOfflinePending) offlinePendingCount++;
+    const minThreshold = r.minThreshold ?? 35.0;
+    const maxThreshold = r.maxThreshold ?? 39.0;
+    
+    // Evaluate run min/max
+    let runMin = r.minTemp;
+    let runMax = r.maxTemp;
+    if (r.sensorData && r.sensorData.length > 0 && (r.startRange || r.endRange)) {
+      const filteredPts = r.sensorData.filter((d: any) => {
+        if (r.startRange && d.time < r.startRange) return false;
+        if (r.endRange && d.time > r.endRange) return false;
+        return true;
+      });
+      if (filteredPts.length > 0) {
+        const temps = filteredPts.map((d: any) => d.temp);
+        runMin = Math.min(...temps);
+        runMax = Math.max(...temps);
+      }
+    }
+    const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
+    if (isExcursion) excursionCount++;
+    else inSpecCount++;
+  });
+
+  const countAllEl = document.getElementById('filterCountAll');
+  const countInSpecEl = document.getElementById('filterCountInSpec');
+  const countExcursionsEl = document.getElementById('filterCountExcursions');
+  const countOfflineEl = document.getElementById('filterCountOffline');
+  const tabOfflineEl = document.getElementById('filterTabOffline');
+
+  if (countAllEl) countAllEl.textContent = String(totalCount);
+  if (countInSpecEl) countInSpecEl.textContent = String(inSpecCount);
+  if (countExcursionsEl) countExcursionsEl.textContent = String(excursionCount);
+  if (countOfflineEl) countOfflineEl.textContent = String(offlinePendingCount);
+  if (tabOfflineEl) tabOfflineEl.style.display = offlinePendingCount > 0 ? 'inline-flex' : 'none';
+
+  // Wire filter tab clicks
+  document.querySelectorAll('#historyFilterTabs .hfilter-tab').forEach(btn => {
+    btn.classList.toggle('is-active', btn.getAttribute('data-filter') === currentHistoryFilterTab);
+    (btn as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const targetFilter = btn.getAttribute('data-filter') as any;
+      if (targetFilter) {
+        currentHistoryFilterTab = targetFilter;
+        renderHistoryDrawer();
+      }
+    };
+  });
+
+  // Footer sync text update
+  const footerSyncText = document.getElementById('drawerSyncFooterText');
+  if (footerSyncText) {
+    if (!isOnline()) {
+      footerSyncText.textContent = offlinePendingCount > 0 
+        ? `IndexedDB Offline Storage (${offlinePendingCount} pending)`
+        : 'IndexedDB Offline Mode Active';
+    } else {
+      footerSyncText.textContent = 'Supabase Real-time Cloud Active · Auto-Sync Nominal';
+    }
+  }
+
   if (!currentUser && savedReports.length === 0) {
     listEl.innerHTML = `
       <div class="history-empty">
@@ -1129,8 +1247,8 @@ export function renderHistoryDrawer() {
     listEl.innerHTML = `
       <div class="history-empty">
         <div class="history-empty__icon">📊</div>
-        <h4>No Reports in Supabase Yet</h4>
-        <p>Upload an Excel sensor file or click "Save Cloud" to store your first report in Supabase.</p>
+        <h4>No Reports in Cloud Archive Yet</h4>
+        <p>Upload an Excel sensor dataset or click "Save Cloud" to store your first calibrated report.</p>
       </div>
     `;
     updateBulkBarUI([]);
@@ -1138,11 +1256,45 @@ export function renderHistoryDrawer() {
   }
 
   const query = historySearchQuery.trim().toLowerCase();
-  const filtered = savedReports.filter(r => {
-    if (!query) return true;
-    return (r.lotNumber && r.lotNumber.toLowerCase().includes(query)) ||
-           (r.fileName && r.fileName.toLowerCase().includes(query)) ||
-           (r.startRange && r.startRange.toLowerCase().includes(query));
+  const filtered = savedReports.filter(report => {
+    // 1. Text Search Filter
+    if (query) {
+      const match = (report.lotNumber && report.lotNumber.toLowerCase().includes(query)) ||
+                    (report.fileName && report.fileName.toLowerCase().includes(query)) ||
+                    (report.startRange && report.startRange.toLowerCase().includes(query));
+      if (!match) return false;
+    }
+
+    // 2. Tab Filter
+    if (currentHistoryFilterTab === 'offline') {
+      return !!report.isOfflinePending;
+    }
+
+    const minThreshold = report.minThreshold ?? 35.0;
+    const maxThreshold = report.maxThreshold ?? 39.0;
+    let runMin = report.minTemp;
+    let runMax = report.maxTemp;
+    if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
+      const filteredPts = report.sensorData.filter((d: any) => {
+        if (report.startRange && d.time < report.startRange) return false;
+        if (report.endRange && d.time > report.endRange) return false;
+        return true;
+      });
+      if (filteredPts.length > 0) {
+        const temps = filteredPts.map((d: any) => d.temp);
+        runMin = Math.min(...temps);
+        runMax = Math.max(...temps);
+      }
+    }
+    const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
+
+    if (currentHistoryFilterTab === 'in-spec') {
+      return !isExcursion;
+    }
+    if (currentHistoryFilterTab === 'excursions') {
+      return isExcursion;
+    }
+    return true;
   });
 
   if (filtered.length === 0) {
@@ -1150,7 +1302,7 @@ export function renderHistoryDrawer() {
       <div class="history-empty">
         <div class="history-empty__icon">🔍</div>
         <h4>No matching reports</h4>
-        <p>No reports matched "${historySearchQuery}". Try another Lot Number.</p>
+        <p>No reports matched your search or current filter "${currentHistoryFilterTab}".</p>
       </div>
     `;
     updateBulkBarUI(filtered);
@@ -1160,8 +1312,29 @@ export function renderHistoryDrawer() {
   listEl.innerHTML = filtered.map(report => {
     const minThreshold = report.minThreshold ?? 35.0;
     const maxThreshold = report.maxThreshold ?? 39.0;
-    const isExcursion = (report.minTemp != null && report.minTemp < minThreshold) ||
-                        (report.maxTemp != null && report.maxTemp > maxThreshold);
+
+    // Calculate run min/max strictly within the run time range
+    let runMin = report.minTemp;
+    let runMax = report.maxTemp;
+    let runPoints = report.rowCount || report.sensorData?.length || 0;
+
+    if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
+      const filteredPts = report.sensorData.filter((d: any) => {
+        if (report.startRange && d.time < report.startRange) return false;
+        if (report.endRange && d.time > report.endRange) return false;
+        return true;
+      });
+      if (filteredPts.length > 0) {
+        const temps = filteredPts.map((d: any) => d.temp);
+        runMin = Math.min(...temps);
+        runMax = Math.max(...temps);
+        runPoints = filteredPts.length;
+      }
+    }
+
+    const minDisplay = runMin != null ? `${runMin.toFixed(1)}°C` : '—';
+    const maxDisplay = runMax != null ? `${runMax.toFixed(1)}°C` : '—';
+    const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
 
     const dateFormatted = report.updatedAt 
       ? new Date(report.updatedAt).toLocaleString() 
@@ -1170,65 +1343,132 @@ export function renderHistoryDrawer() {
     const isSelected = selectedReportIds.has(report.id);
     const displayName = report.fileName || (report.lotNumber ? `Lot_${report.lotNumber}.xlsx` : 'Sensor_Data.xlsx');
 
+    // Uploading / sync status indicator beside file name
+    const isUploading = activeUploadingIds.has(report.id) || report.isUploading;
+    let uploadStatusHtml = '';
+
+    if (isUploading) {
+      uploadStatusHtml = `
+        <span class="hcard-status-badge hcard-status-badge--uploading" title="File is currently uploading to Supabase Cloud">
+          <svg class="hcard-spinner" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+            <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
+          </svg>
+          <span>Uploading...</span>
+        </span>
+      `;
+    } else if (report.isOfflinePending) {
+      uploadStatusHtml = `
+        <span class="hcard-status-badge hcard-status-badge--queued" title="File saved in local IndexedDB. Will sync when connection is restored.">
+          <span class="hcard-dot hcard-dot--amber"></span>
+          <span>Offline Queued</span>
+        </span>
+      `;
+    } else {
+      uploadStatusHtml = `
+        <span class="hcard-status-badge hcard-status-badge--synced" title="Persisted and synced to Supabase Cloud database">
+          <span class="hcard-dot hcard-dot--emerald"></span>
+          <span>Synced</span>
+        </span>
+      `;
+    }
+
     return `
       <div class="history-card ${isSelected ? 'history-card--selected' : ''}" data-id="${report.id}">
-        <!-- Primary Compact Row: File Name, Lot, Load, Delete, Details trigger -->
-        <div class="history-card__main-row">
-          <label class="history-card__select" title="Select report" onclick="event.stopPropagation()">
+        <!-- Top Row: Checkbox, Identity & File Name with live Uploading indicator -->
+        <div class="hcard-top-row">
+          <label class="hcard-select-wrap" title="Select report" onclick="event.stopPropagation()">
             <input type="checkbox" class="history-card-checkbox" data-id="${report.id}" ${isSelected ? 'checked' : ''}>
           </label>
 
-          <div class="history-card__identity" onclick="window.CloudStorage.toggleDetails('${report.id}')" title="Click to view full details">
-            <div class="history-card__file-name">
-              <span class="file-icon">📄</span>
-              <strong class="file-title truncate">${displayName}</strong>
+          <div class="hcard-identity-box">
+            <div class="hcard-title-line">
+              <span class="hcard-file-icon">📄</span>
+              <strong class="hcard-file-name truncate" title="${displayName}">${displayName}</strong>
+              <!-- Status indicator rendered directly beside file name -->
+              ${uploadStatusHtml}
             </div>
-            <div class="history-card__lot-sub">
-              <span class="lot-pill">Lot: ${report.lotNumber || '—'}</span>
-              <span class="details-toggle-lbl" id="details-lbl-${report.id}">Details ▾</span>
-            </div>
-          </div>
 
-          <div class="history-card__actions">
-            <button class="hcard-btn hcard-btn--load" onclick="window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-              </svg>
-              <span>Load</span>
-            </button>
-            <button class="hcard-btn hcard-btn--delete" onclick="window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber || ''}')" title="Delete report from Supabase">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
-              </svg>
-            </button>
+            <div class="hcard-meta-line">
+              <span class="hcard-lot-badge">Lot: ${report.lotNumber || '—'}</span>
+              <span class="hcard-sep">·</span>
+              <span class="hcard-date-meta">Saved ${dateFormatted}</span>
+            </div>
           </div>
         </div>
 
-        <!-- Collapsible Detail Section -->
-        <div class="history-card__collapsible" id="hdetails-${report.id}" style="display:none;">
-          <div class="history-card__details">
-            <div class="hdetail-item">
-              <span class="hdetail-label">Saved</span>
-              <span class="hdetail-val">${dateFormatted}</span>
+        <!-- Telemetry Panel: Calibrated Run Time Range & Min/Max Temperatures -->
+        <div class="hcard-telemetry">
+          <!-- Time Range Strip -->
+          <div class="hcard-range-line">
+            <div class="hcard-range-left">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" class="hcard-range-icon">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span class="hcard-range-text">${report.startRange || '—'} → ${report.endRange || '—'}</span>
             </div>
-            <div class="hdetail-item">
-              <span class="hdetail-label">Min / Max</span>
-              <span class="hdetail-val ${isExcursion ? 'hdetail-val--excursion' : 'hdetail-val--normal'}">
-                ${report.minTemp != null ? report.minTemp.toFixed(2) + '°C' : '—'} / ${report.maxTemp != null ? report.maxTemp.toFixed(2) + '°C' : '—'}
+            <div class="hcard-range-stats">
+              <span>${report.duration || '—'}</span>
+              <span class="hcard-sep">·</span>
+              <span>${runPoints} pts</span>
+            </div>
+          </div>
+
+          <!-- Min/Max Readouts: Min. temp. this run / Max. temp. this run -->
+          <div class="hcard-temp-grid">
+            <div class="hcard-temp-cell">
+              <span class="hcard-temp-label">Min. temp. this run:</span>
+              <span class="hcard-temp-val tabular-nums ${runMin != null && runMin < minThreshold ? 'hcard-temp-val--excursion' : ''}">
+                ${minDisplay}
               </span>
             </div>
-            <div class="hdetail-item">
-              <span class="hdetail-label">Records</span>
-              <span class="hdetail-val">${report.rowCount || report.sensorData?.length || '—'} pts</span>
+            <div class="hcard-temp-cell">
+              <span class="hcard-temp-label">Max. temp. this run:</span>
+              <span class="hcard-temp-val tabular-nums ${runMax != null && runMax > maxThreshold ? 'hcard-temp-val--excursion' : ''}">
+                ${maxDisplay}
+              </span>
             </div>
-            <div class="hdetail-item">
-              <span class="hdetail-label">Duration</span>
-              <span class="hdetail-val">${report.duration || '—'}</span>
-            </div>
-            <div class="hdetail-item">
-              <span class="hdetail-label">Range</span>
-              <span class="hdetail-val truncate" style="max-width:200px;">${report.startRange || '—'} → ${report.endRange || '—'}</span>
-            </div>
+          </div>
+
+          <!-- Compliance Indicator -->
+          <div class="hcard-compliance-bar ${isExcursion ? 'hcard-compliance-bar--warn' : 'hcard-compliance-bar--ok'}">
+            <span>${isExcursion ? '▲' : '●'}</span>
+            <span>
+              ${isExcursion 
+                ? `Excursion Detected (Spec: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C)` 
+                : `In-Spec Acceptance Criteria: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C`
+              }
+            </span>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="hcard-action-bar">
+          <button class="hcard-load-btn" onclick="window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+            <span>Load Graph</span>
+          </button>
+
+          <div class="hcard-action-icons">
+            <button class="hcard-btn-sec" onclick="window.CloudStorage.downloadExcel('${report.id}')" title="Download Excel (.xlsx)">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/>
+              </svg>
+              <span>.XLSX</span>
+            </button>
+            <button class="hcard-btn-sec" onclick="window.CloudStorage.downloadPdf('${report.id}')" title="Download PDF Report">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/>
+              </svg>
+              <span>PDF</span>
+            </button>
+            <button class="hcard-del-btn" onclick="window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber || ''}')" title="Delete report from Supabase Cloud">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>
+              </svg>
+            </button>
           </div>
         </div>
       </div>

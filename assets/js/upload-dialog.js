@@ -179,7 +179,20 @@ const UploadDialog = {
             try {
                 const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
                 const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
-                const temps = this.currentParsed.data.map(d => d.temp);
+                
+                // Filter strictly to the confirmed run time range
+                const runPoints = this.currentParsed.data.filter(d => 
+                    (!res.startVal || d.time >= res.startVal) && 
+                    (!res.endVal || d.time <= res.endVal)
+                );
+                const targetPoints = runPoints.length > 0 ? runPoints : this.currentParsed.data;
+                const runTemps = targetPoints.map(d => d.temp);
+                const minTempRun = runTemps.length ? parseFloat(Math.min(...runTemps).toFixed(2)) : 0;
+                const maxTempRun = runTemps.length ? parseFloat(Math.max(...runTemps).toFixed(2)) : 0;
+                const durationStr = (window.Utils && typeof window.Utils.formatDuration === 'function') 
+                    ? window.Utils.formatDuration(res.startVal, res.endVal) 
+                    : '—';
+
                 window.CloudStorage.saveDirectReport({
                     lotNumber: res.lotNumber,
                     fileName: cloudFileName,
@@ -189,10 +202,10 @@ const UploadDialog = {
                     maxThreshold: maxThresh,
                     startRange: res.startVal,
                     endRange: res.endVal,
-                    minTemp: Math.min(...temps),
-                    maxTemp: Math.max(...temps),
-                    duration: (window.Utils && typeof window.Utils.formatDuration === 'function') ? window.Utils.formatDuration(res.startVal, res.endVal) : '—',
-                    rowCount: this.currentParsed.data.length,
+                    minTemp: minTempRun,
+                    maxTemp: maxTempRun,
+                    duration: durationStr,
+                    rowCount: targetPoints.length,
                     sensorData: this.currentParsed.data,
                     chartMode: (window.state && window.state.chartMode) || 'color'
                 });
@@ -216,7 +229,19 @@ const UploadDialog = {
                 Toast.info('☁️ Saving report to Supabase...');
                 const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
                 const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
-                const temps = this.currentParsed.data.map(d => d.temp);
+
+                // Filter strictly to the confirmed run time range
+                const runPoints = this.currentParsed.data.filter(d => 
+                    (!res.startVal || d.time >= res.startVal) && 
+                    (!res.endVal || d.time <= res.endVal)
+                );
+                const targetPoints = runPoints.length > 0 ? runPoints : this.currentParsed.data;
+                const runTemps = targetPoints.map(d => d.temp);
+                const minTempRun = runTemps.length ? parseFloat(Math.min(...runTemps).toFixed(2)) : 0;
+                const maxTempRun = runTemps.length ? parseFloat(Math.max(...runTemps).toFixed(2)) : 0;
+                const durationStr = (window.Utils && typeof window.Utils.formatDuration === 'function') 
+                    ? window.Utils.formatDuration(res.startVal, res.endVal) 
+                    : '—';
 
                 const saved = await window.CloudStorage.saveDirectReport({
                     lotNumber: res.lotNumber,
@@ -227,10 +252,10 @@ const UploadDialog = {
                     maxThreshold: maxThresh,
                     startRange: res.startVal,
                     endRange: res.endVal,
-                    minTemp: Math.min(...temps),
-                    maxTemp: Math.max(...temps),
-                    duration: Utils.formatDuration(res.startVal, res.endVal) || '—',
-                    rowCount: this.currentParsed.data.length,
+                    minTemp: minTempRun,
+                    maxTemp: maxTempRun,
+                    duration: durationStr,
+                    rowCount: targetPoints.length,
                     sensorData: this.currentParsed.data,
                     chartMode: state.chartMode || 'color'
                 });

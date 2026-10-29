@@ -26,3 +26,385 @@ body.show-cloud-controls #authContainer > #signInBtn {
   letter-spacing: 0.04em;
   font-weight: 500;
 }
+
+/* ================================================================
+   Modern Clean Redesign: History Drawer, Cards & Telemetry
+   ================================================================ */
+
+.history-drawer {
+  width: 480px !important;
+  max-width: 100vw !important;
+}
+
+.history-drawer__filter-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-light);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.hfilter-tab {
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-surface-alt);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hfilter-tab:hover {
+  background: var(--bg-surface-soft);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.hfilter-tab.is-active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.history-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-card:hover {
+  border-color: var(--accent-light, #6366f1);
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+.history-card--selected {
+  border-color: var(--accent, #4f46e5);
+  background: rgba(79, 70, 229, 0.03);
+}
+
+/* Card Header Zone */
+.hcard-top-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hcard-select-wrap {
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.hcard-identity-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hcard-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hcard-file-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.hcard-file-name {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* Live Uploading & Sync Status Badge Beside File Name */
+.hcard-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  padding: 1.5px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.hcard-status-badge--uploading {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  animation: pulseUploading 2s infinite ease-in-out;
+}
+
+@keyframes pulseUploading {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.hcard-status-badge--queued {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
+
+.hcard-status-badge--synced {
+  color: #059669;
+  background: rgba(5, 150, 105, 0.08);
+  border: 1px solid rgba(5, 150, 105, 0.2);
+}
+
+.hcard-spinner {
+  animation: hcardSpin 0.9s linear infinite;
+  display: inline-block;
+}
+
+@keyframes hcardSpin {
+  100% { transform: rotate(360deg); }
+}
+
+.hcard-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.hcard-dot--amber {
+  background: #f59e0b;
+}
+
+.hcard-dot--emerald {
+  background: #10b981;
+}
+
+/* Card Subtitle (Lot & Date) */
+.hcard-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.hcard-lot-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.hcard-sep {
+  color: var(--text-faint);
+}
+
+/* Precision Telemetry Panel */
+.hcard-telemetry {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hcard-range-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 7px;
+}
+
+.hcard-range-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hcard-range-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.hcard-range-text {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.hcard-range-stats {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* Min/Max Telemetry Grid */
+.hcard-temp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.hcard-temp-cell {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hcard-temp-label {
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.hcard-temp-val {
+  font-size: 14.5px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.hcard-temp-val--excursion {
+  color: #dc2626;
+}
+
+/* Compliance Status Strip */
+.hcard-compliance-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.hcard-compliance-bar--ok {
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.hcard-compliance-bar--warn {
+  background: rgba(245, 158, 11, 0.08);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+/* Action Buttons Strip */
+.hcard-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.hcard-load-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hcard-load-btn:hover {
+  background: var(--accent-light);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+}
+
+.hcard-action-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hcard-btn-sec {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-surface-alt);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.hcard-btn-sec:hover {
+  background: var(--bg-surface-soft);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+
+.hcard-del-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.hcard-del-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+}
