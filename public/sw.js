@@ -4,7 +4,7 @@
  * Enables offline loading and asset caching
  */
 
-const CACHE_NAME = 'hpt-report-cache-v1';
+const CACHE_NAME = 'hpt-report-cache-v2';
 
 const PRECACHE_URLS = [
   './',
@@ -12,16 +12,16 @@ const PRECACHE_URLS = [
   'manifest.webmanifest',
   'assets/css/style.css?v=20260919',
   'assets/images/logo.png',
-  'assets/js/config.js?v=20260919',
-  'assets/js/i18n.js?v=20260919',
-  'assets/js/utils.js?v=20260919',
-  'assets/js/parser.js?v=20260919',
-  'assets/js/chart.js?v=20260919',
-  'assets/js/dashboard.js?v=20260919',
-  'assets/js/upload-dialog.js?v=20260919',
-  'assets/js/exporter.js?v=20260919',
-  'assets/js/main.js?v=20260919',
-  'assets/js/queue.js?v=20260919',
+  'assets/js/config.js?v=20261108',
+  'assets/js/i18n.js?v=20261108',
+  'assets/js/utils.js?v=20261108',
+  'assets/js/parser.js?v=20261108',
+  'assets/js/chart.js?v=20261108',
+  'assets/js/dashboard.js?v=20261108',
+  'assets/js/upload-dialog.js?v=20261108',
+  'assets/js/exporter.js?v=20261108',
+  'assets/js/main.js?v=20261108',
+  'assets/js/queue.js?v=20261108',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',

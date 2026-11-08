@@ -70,8 +70,17 @@ const UploadDialog = {
             tempRangeEl.textContent = `${Math.min(...temps).toFixed(1)}°C ~ ${Math.max(...temps).toFixed(1)}°C`;
         }
 
-        // Determine default Lot Number
-        let defaultLot = parsedResult.lot;
+        // Determine default Lot Number:
+        // Priority 1: Uploaded file name (e.g. "EXT-S0125-20261025-194N1.xlsx" -> "EXT-S0125-20261025-194N1")
+        // Priority 2: Parsed lot from spreadsheet content metadata
+        // Priority 3: Current input value or default fallback
+        let defaultLot = '';
+        if (file && file.name) {
+            defaultLot = file.name.replace(/\.[^/.]+$/, '').trim();
+        }
+        if (!defaultLot || defaultLot === 'EXT-UNSPECIFIED') {
+            defaultLot = parsedResult.lot;
+        }
         if (!defaultLot || defaultLot === 'EXT-UNSPECIFIED') {
             const currentLot = document.getElementById('lotNumberInput')?.value.trim();
             defaultLot = currentLot || 'EXT-2026-001';

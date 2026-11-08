@@ -70,8 +70,17 @@ const UploadDialog = {
             tempRangeEl.textContent = `${Math.min(...temps).toFixed(1)}°C ~ ${Math.max(...temps).toFixed(1)}°C`;
         }
 
-        // Determine default Lot Number
-        let defaultLot = parsedResult.lot;
+        // Determine default Lot Number:
+        // Priority 1: Uploaded file name (e.g. "EXT-S0125-20261025-194N1.xlsx" -> "EXT-S0125-20261025-194N1")
+        // Priority 2: Parsed lot from spreadsheet content metadata
+        // Priority 3: Current input value or default fallback
+        let defaultLot = '';
+        if (file && file.name) {
+            defaultLot = file.name.replace(/\.[^/.]+$/, '').trim();
+        }
+        if (!defaultLot || defaultLot === 'EXT-UNSPECIFIED') {
+            defaultLot = parsedResult.lot;
+        }
         if (!defaultLot || defaultLot === 'EXT-UNSPECIFIED') {
             const currentLot = document.getElementById('lotNumberInput')?.value.trim();
             defaultLot = currentLot || 'EXT-2026-001';
@@ -172,21 +181,50 @@ const UploadDialog = {
         const res = this.applyToDashboard();
         if (!res) return;
 
-        // Cache last uploaded file with user's customized lot name
-        if (this.currentFile && window.CloudStorage && typeof window.CloudStorage.onNewReportLoaded === 'function') {
+        const cloudFileName = res.lotNumber.toLowerCase().endsWith('.xlsx') ? res.lotNumber : `${res.lotNumber}.xlsx`;
+
+        // Automatically archive to cloud so uploaded files are never lost
+        if (window.CloudStorage && typeof window.CloudStorage.saveDirectReport === 'function') {
             try {
-                const buffer = await this.currentFile.arrayBuffer();
-                const cloudName = res.lotNumber.toLowerCase().endsWith('.xlsx') ? res.lotNumber : `${res.lotNumber}.xlsx`;
-                window.CloudStorage.onNewReportLoaded({
-                    name: cloudName,
-                    size: this.currentFile.size,
-                    fileBuffer: buffer
+                const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
+                const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
+                
+                // Filter strictly to the confirmed run time range
+                const runPoints = this.currentParsed.data.filter(d => 
+                    (!res.startVal || d.time >= res.startVal) && 
+                    (!res.endVal || d.time <= res.endVal)
+                );
+                const targetPoints = runPoints.length > 0 ? runPoints : this.currentParsed.data;
+                const runTemps = targetPoints.map(d => d.temp);
+                const minTempRun = runTemps.length ? parseFloat(Math.min(...runTemps).toFixed(2)) : 0;
+                const maxTempRun = runTemps.length ? parseFloat(Math.max(...runTemps).toFixed(2)) : 0;
+                const durationStr = (window.Utils && typeof window.Utils.formatDuration === 'function') 
+                    ? window.Utils.formatDuration(res.startVal, res.endVal) 
+                    : '—';
+
+                window.CloudStorage.saveDirectReport({
+                    lotNumber: res.lotNumber,
+                    fileName: cloudFileName,
+                    fileSize: this.currentFile ? this.currentFile.size : 0,
+                    fileBase64: this.fileBase64 || '',
+                    minThreshold: minThresh,
+                    maxThreshold: maxThresh,
+                    startRange: res.startVal,
+                    endRange: res.endVal,
+                    minTemp: minTempRun,
+                    maxTemp: maxTempRun,
+                    duration: durationStr,
+                    rowCount: targetPoints.length,
+                    sensorData: this.currentParsed.data,
+                    chartMode: (window.state && window.state.chartMode) || 'color'
                 });
-            } catch (e) {}
+            } catch (err) {
+                console.warn('Auto cloud archive note:', err);
+            }
         }
 
         this.close();
-        Toast.success(`📊 Graph loaded for Lot [${res.lotNumber}]`);
+        Toast.success(`📊 Graph loaded & saved to cloud for Lot [${res.lotNumber}]`);
     },
 
     async handleSaveAndShow() {
@@ -197,10 +235,22 @@ const UploadDialog = {
 
         if (window.CloudStorage && typeof window.CloudStorage.saveDirectReport === 'function') {
             try {
-                Toast.info('☁️ Saving report to Cloud Firestore...');
+                Toast.info('☁️ Saving report to Supabase...');
                 const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
                 const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
-                const temps = this.currentParsed.data.map(d => d.temp);
+
+                // Filter strictly to the confirmed run time range
+                const runPoints = this.currentParsed.data.filter(d => 
+                    (!res.startVal || d.time >= res.startVal) && 
+                    (!res.endVal || d.time <= res.endVal)
+                );
+                const targetPoints = runPoints.length > 0 ? runPoints : this.currentParsed.data;
+                const runTemps = targetPoints.map(d => d.temp);
+                const minTempRun = runTemps.length ? parseFloat(Math.min(...runTemps).toFixed(2)) : 0;
+                const maxTempRun = runTemps.length ? parseFloat(Math.max(...runTemps).toFixed(2)) : 0;
+                const durationStr = (window.Utils && typeof window.Utils.formatDuration === 'function') 
+                    ? window.Utils.formatDuration(res.startVal, res.endVal) 
+                    : '—';
 
                 const saved = await window.CloudStorage.saveDirectReport({
                     lotNumber: res.lotNumber,
@@ -211,10 +261,10 @@ const UploadDialog = {
                     maxThreshold: maxThresh,
                     startRange: res.startVal,
                     endRange: res.endVal,
-                    minTemp: Math.min(...temps),
-                    maxTemp: Math.max(...temps),
-                    duration: Utils.formatDuration(res.startVal, res.endVal) || '—',
-                    rowCount: this.currentParsed.data.length,
+                    minTemp: minTempRun,
+                    maxTemp: maxTempRun,
+                    duration: durationStr,
+                    rowCount: targetPoints.length,
                     sensorData: this.currentParsed.data,
                     chartMode: state.chartMode || 'color'
                 });

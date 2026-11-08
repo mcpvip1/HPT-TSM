@@ -228,6 +228,12 @@ const App = {
                 return;
             }
 
+            const firstRowTime = (bestResult.data && bestResult.data[0]) ? bestResult.data[0].time : '—';
+            const lastRowTime = (bestResult.data && bestResult.data.length > 0) ? bestResult.data[bestResult.data.length - 1].time : '—';
+            const runDuration = (window.Utils && typeof window.Utils.formatDuration === 'function')
+                ? (window.Utils.formatDuration(firstRowTime, lastRowTime) || '—')
+                : '—';
+
             // Ask user for Lot Number, Start & End times, with buttons to Save and Show Graph
             if (window.UploadDialog && typeof window.UploadDialog.open === 'function') {
                 window.UploadDialog.open(file, bestResult);
@@ -236,26 +242,21 @@ const App = {
                 state.rawData = bestResult.data.slice();
 
                 if (bestResult.lot) {
-                    document.getElementById('lotNumberInput').value = bestResult.lot;
+                    const lotInput = document.getElementById('lotNumberInput');
+                    if (lotInput) lotInput.value = bestResult.lot;
                     Dashboard.updateLotBadge();
                 }
 
                 Dashboard.showFullResult();
             }
 
-            const firstTime = bestResult.data[0]?.time || '—';
-            const lastTime = bestResult.data[bestResult.data.length - 1]?.time || '—';
-            const duration = (window.Utils && typeof window.Utils.formatDuration === 'function')
-                ? window.Utils.formatDuration(firstTime, lastTime)
-                : '—';
-
             Debug.log(
                 `<strong>Used sheet:</strong> ${bestSheetName}<br>` +
-                `<strong>Parsed rows:</strong> ${bestResult.data.length}<br>` +
+                `<strong>Parsed rows:</strong> ${bestResult.data ? bestResult.data.length : 0}<br>` +
                 `<strong>Lot:</strong> ${bestResult.lot || '—'}<br>` +
-                `<strong>Start:</strong> ${firstTime}<br>` +
-                `<strong>End:</strong> ${lastTime}<br>` +
-                `<strong>Duration:</strong> ${duration || '—'}<br>` +
+                `<strong>Start:</strong> ${firstRowTime}<br>` +
+                `<strong>End:</strong> ${lastRowTime}<br>` +
+                `<strong>Duration:</strong> ${runDuration}<br>` +
                 `<strong>Columns:</strong> time=${bestResult._detectedCols?.timeCol || '—'}, temp=${bestResult._detectedCols?.tempCol || '—'}<br>` +
                 `<strong>All sheets:</strong><br>${debugLines.join('<br>')}`
             );

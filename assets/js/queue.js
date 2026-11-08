@@ -158,7 +158,8 @@ const QueueManager = {
 
             item.progress = 75;
             item.parsedData = bestResult;
-            item.lotNumber = bestResult.lot || 'EXT-UNSPECIFIED';
+            const fileBaseName = (item.file && item.file.name) ? item.file.name.replace(/\.[^/.]+$/, '').trim() : '';
+            item.lotNumber = (bestResult.lot && bestResult.lot !== 'EXT-UNSPECIFIED') ? bestResult.lot : (fileBaseName || 'EXT-UNSPECIFIED');
             item.rowCount = bestResult.data.length;
 
             const firstTime = bestResult.data[0].time;
