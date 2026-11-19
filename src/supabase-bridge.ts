@@ -7,15 +7,13 @@
  */
 
 import './index.css';
-import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import type { User } from '@supabase/supabase-js';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase-client';
 import {
   enqueuePendingReport,
   getPendingReports,
   getPendingCount,
   deleteCachedReport,
-  saveReportsToCache,
-  saveActiveSessionData,
-  getActiveSessionData,
   OfflineQueuedReport
 } from './offline-storage';
 import {
@@ -26,16 +24,7 @@ import {
   SyncStatusEvent
 } from './sync-service';
 
-export const SUPABASE_URL = 'https://dizmakvrzsntqbphdixh.supabase.co';
-export const SUPABASE_ANON_KEY = 'sb_publishable_8kw2oWaEFs-p7grgw2fuGQ_wdTco6qZ';
-
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  }
-});
+export { supabase, SUPABASE_URL, SUPABASE_ANON_KEY };
 
 export interface SavedReport {
   id: string;
@@ -68,13 +57,115 @@ let currentUser: User | null = null;
 let savedReports: SavedReport[] = [];
 let historySearchQuery = '';
 let selectedReportIds = new Set<string>();
-let isSigningIn = false;
 let lastUploadedFile: { name: string; size: number; base64: string } | null = null;
 let reportsSubscription: any = null;
 let currentPendingCount = 0;
 export const activeUploadingIds = new Set<string>();
 export const expandedReportIds = new Set<string>();
 let currentHistoryFilterTab: 'all' | 'in-spec' | 'excursions' | 'offline' = 'all';
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeTs(ts?: string): string {
+  return (ts || '').replace(/-/g, '/').replace(' ', '_');
+}
+
+function computeMinMax(values: number[]): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  let found = false;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (typeof v === 'number' && !isNaN(v)) {
+      if (v < min) min = v;
+      if (v > max) max = v;
+      found = true;
+    }
+  }
+  return found ? { min, max } : null;
+}
+
+function computeRunTelemetry(report: SavedReport): {
+  runMin: number | undefined;
+  runMax: number | undefined;
+  runPoints: number;
+  isExcursion: boolean;
+} {
+  const minThreshold = report.minThreshold ?? 35.0;
+  const maxThreshold = report.maxThreshold ?? 39.0;
+  let runMin = report.minTemp;
+  let runMax = report.maxTemp;
+  let runPoints = report.rowCount || report.sensorData?.length || 0;
+
+  if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
+    const normStart = normalizeTs(report.startRange);
+    const normEnd = normalizeTs(report.endRange);
+    const filteredTemps: number[] = [];
+    for (let i = 0; i < report.sensorData.length; i++) {
+      const d = report.sensorData[i];
+      const t = normalizeTs(d.time);
+      if (normStart && t < normStart) continue;
+      if (normEnd && t > normEnd) continue;
+      filteredTemps.push(Number(d.temp));
+    }
+    if (filteredTemps.length > 0) {
+      const stats = computeMinMax(filteredTemps);
+      if (stats) {
+        runMin = parseFloat(stats.min.toFixed(2));
+        runMax = parseFloat(stats.max.toFixed(2));
+        runPoints = filteredTemps.length;
+      }
+    }
+  }
+
+  const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
+  return { runMin, runMax, runPoints, isExcursion };
+}
+
+function getFilteredReports(): SavedReport[] {
+  const query = historySearchQuery.trim().toLowerCase();
+  return savedReports.filter(report => {
+    if (query) {
+      const match =
+        (report.lotNumber && report.lotNumber.toLowerCase().includes(query)) ||
+        (report.fileName && report.fileName.toLowerCase().includes(query)) ||
+        (report.startRange && report.startRange.toLowerCase().includes(query));
+      if (!match) return false;
+    }
+
+    if (currentHistoryFilterTab === 'offline') {
+      return !!report.isOfflinePending;
+    }
+
+    if (currentHistoryFilterTab === 'in-spec' || currentHistoryFilterTab === 'excursions') {
+      const { isExcursion } = computeRunTelemetry(report);
+      return currentHistoryFilterTab === 'excursions' ? isExcursion : !isExcursion;
+    }
+
+    return true;
+  });
+}
+
+async function confirmAction(opts: {
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+}): Promise<boolean> {
+  const confirmDialog = (window as any).Utils?.confirmDialog;
+  if (typeof confirmDialog === 'function') {
+    return await confirmDialog(opts);
+  }
+  return true;
+}
 
 // UI Elements & Helpers
 function setSyncStatus(status: 'synced' | 'syncing' | 'offline' | 'saved' | 'queued', text?: string) {
@@ -153,23 +244,27 @@ function renderAuthUI() {
   if (!container) return;
 
   if (currentUser) {
-    const initials = (currentUser.user_metadata?.full_name || currentUser.email || 'U')
+    const rawName = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'User';
+    const rawEmail = currentUser.email || '';
+    const initials = (currentUser.user_metadata?.full_name || rawEmail || 'U')
       .split(' ')
+      .filter(Boolean)
       .map((n: string) => n[0])
       .join('')
       .substring(0, 2)
       .toUpperCase();
 
-    const avatarHtml = currentUser.user_metadata?.avatar_url 
-      ? `<img src="${currentUser.user_metadata.avatar_url}" alt="avatar" class="user-avatar-img">`
-      : `<div class="user-avatar-fallback">${initials}</div>`;
+    const safeAvatarUrl = currentUser.user_metadata?.avatar_url ? escapeHtml(currentUser.user_metadata.avatar_url) : '';
+    const avatarHtml = safeAvatarUrl
+      ? `<img src="${safeAvatarUrl}" alt="avatar" class="user-avatar-img">`
+      : `<div class="user-avatar-fallback">${escapeHtml(initials)}</div>`;
 
     container.innerHTML = `
-      <div class="user-profile-badge" title="${currentUser.email || ''}">
+      <div class="user-profile-badge" title="${escapeHtml(rawEmail)}">
         ${avatarHtml}
         <div class="user-info-text">
-          <span class="user-name">${currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'User'}</span>
-          <span class="user-email">${currentUser.email || ''}</span>
+          <span class="user-name">${escapeHtml(rawName)}</span>
+          <span class="user-email">${escapeHtml(rawEmail)}</span>
         </div>
         <button id="signOutBtn" class="auth-btn auth-btn--logout" title="Sign out of account">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
@@ -237,8 +332,8 @@ function showAuthFallbackModal() {
   if (document.getElementById('authFallbackModalBackdrop')) return;
 
   const stored = getStoredUser();
-  const defaultEmail = stored?.email || 'mcpvip1@gmail.com';
-  const defaultName = stored?.user_metadata?.full_name || 'Lab Operator';
+  const defaultEmail = escapeHtml(stored?.email || 'mcpvip1@gmail.com');
+  const defaultName = escapeHtml(stored?.user_metadata?.full_name || 'Lab Operator');
 
   const backdrop = document.createElement('div');
   backdrop.id = 'authFallbackModalBackdrop';
@@ -251,8 +346,8 @@ function showAuthFallbackModal() {
       </div>
       <div class="domain-modal__body">
         <!-- Direct Operator Identity (Fastest, zero-config) -->
-        <div style="background:var(--bg-secondary);padding:14px;border-radius:8px;border:1px solid var(--border-color);margin-bottom:14px;">
-          <h4 style="font-size:13px;font-weight:600;margin-bottom:4px;color:var(--text-main);">⚡ Instant Operator Sign-In</h4>
+        <div style="background:var(--bg-surface-alt);padding:14px;border-radius:8px;border:1px solid var(--border);margin-bottom:14px;">
+          <h4 style="font-size:13px;font-weight:600;margin-bottom:4px;color:var(--text-primary);">⚡ Instant Operator Sign-In</h4>
           <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">
             Connects your profile directly to your Supabase <code>reports</code> database with full sync capability.
           </p>
@@ -260,11 +355,11 @@ function showAuthFallbackModal() {
           <div style="display:flex;flex-direction:column;gap:8px;">
             <div>
               <label style="font-size:11px;color:var(--text-faint);display:block;margin-bottom:2px;">Operator Name</label>
-              <input type="text" id="authNameInput" value="${defaultName}" class="history-search__input" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border-color);border-radius:5px;background:var(--bg-input);color:var(--text-main);font-size:12px;" />
+              <input type="text" id="authNameInput" value="${defaultName}" class="history-search__input" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-size:12px;" />
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-faint);display:block;margin-bottom:2px;">Email Address</label>
-              <input type="email" id="authEmailDirectInput" value="${defaultEmail}" class="history-search__input" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border-color);border-radius:5px;background:var(--bg-input);color:var(--text-main);font-size:12px;" />
+              <input type="email" id="authEmailDirectInput" value="${defaultEmail}" class="history-search__input" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-size:12px;" />
             </div>
             <button id="btnDirectConnect" class="tbtn tbtn--upload" style="width:100%;justify-content:center;padding:9px;margin-top:4px;">
               <span>Connect &amp; Sync to Supabase</span>
@@ -273,10 +368,10 @@ function showAuthFallbackModal() {
         </div>
 
         <!-- Optional: Supabase Email Magic Link -->
-        <div style="border-top:1px solid var(--border-color);padding-top:12px;margin-top:10px;">
-          <h4 style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-main);">✉️ Send Magic Link (Email OTP)</h4>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:10px;">
+          <h4 style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-primary);">✉️ Send Magic Link (Email OTP)</h4>
           <div style="display:flex;gap:6px;margin-top:6px;">
-            <input type="email" id="authEmailOtpInput" placeholder="name@company.com" class="history-search__input" style="flex:1;padding:7px 10px;border:1px solid var(--border-color);border-radius:5px;background:var(--bg-input);color:var(--text-main);font-size:12px;" />
+            <input type="email" id="authEmailOtpInput" placeholder="name@company.com" class="history-search__input" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-size:12px;" />
             <button id="btnSendMagicLink" class="tbtn tbtn--primary" style="padding:7px 12px;font-size:12px;white-space:nowrap;">
               <span>Send Link</span>
             </button>
@@ -284,8 +379,8 @@ function showAuthFallbackModal() {
         </div>
 
         <!-- Optional: Google OAuth Notice -->
-        <div style="border-top:1px solid var(--border-color);padding-top:12px;margin-top:12px;">
-          <h4 style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-main);">🌐 Google Sign-In</h4>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px;">
+          <h4 style="font-size:12px;font-weight:600;margin-bottom:4px;color:var(--text-primary);">🌐 Google Sign-In</h4>
           <p style="font-size:10px;color:var(--text-faint);margin-bottom:8px;">
             Note: Requires Google Provider enabled under Supabase Dashboard &gt; Authentication &gt; Providers &gt; Google.
           </p>
@@ -299,7 +394,14 @@ function showAuthFallbackModal() {
 
   document.body.appendChild(backdrop);
 
-  const dismiss = () => backdrop.remove();
+  const onEsc = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') dismiss();
+  };
+  const dismiss = () => {
+    document.removeEventListener('keydown', onEsc);
+    backdrop.remove();
+  };
+  document.addEventListener('keydown', onEsc);
   document.getElementById('closeAuthModalBtn')?.addEventListener('click', dismiss);
   backdrop.addEventListener('click', (e) => {
     if (e.target === backdrop) dismiss();
@@ -380,7 +482,7 @@ function showAuthFallbackModal() {
 async function handleSignOut() {
   try {
     if (reportsSubscription) {
-      reportsSubscription.unsubscribe();
+      supabase.removeChannel(reportsSubscription);
       reportsSubscription = null;
     }
     await supabase.auth.signOut();
@@ -410,20 +512,22 @@ function mapDbRowToReport(row: any): SavedReport {
 
   // If sensor_data has points and a range was specified, calculate run min and max strictly within that time range:
   if (sensorData.length > 0 && (startRange || endRange)) {
-    const normStart = startRange ? startRange.replace(/-/g, '/').replace(' ', '_') : '';
-    const normEnd = endRange ? endRange.replace(/-/g, '/').replace(' ', '_') : '';
-    const runFiltered = sensorData.filter((d: any) => {
-      const t = (d.time || '').replace(/-/g, '/').replace(' ', '_');
-      if (normStart && t < normStart) return false;
-      if (normEnd && t > normEnd) return false;
-      return true;
-    });
-    if (runFiltered.length > 0) {
-      const temps = runFiltered.map((d: any) => Number(d.temp)).filter((n: number) => !isNaN(n));
-      if (temps.length > 0) {
-        minTemp = parseFloat(Math.min(...temps).toFixed(2));
-        maxTemp = parseFloat(Math.max(...temps).toFixed(2));
-        rowCount = runFiltered.length;
+    const normStart = normalizeTs(startRange);
+    const normEnd = normalizeTs(endRange);
+    const runTemps: number[] = [];
+    for (let i = 0; i < sensorData.length; i++) {
+      const d = sensorData[i];
+      const t = normalizeTs(d.time);
+      if (normStart && t < normStart) continue;
+      if (normEnd && t > normEnd) continue;
+      runTemps.push(Number(d.temp));
+    }
+    if (runTemps.length > 0) {
+      const stats = computeMinMax(runTemps);
+      if (stats) {
+        minTemp = parseFloat(stats.min.toFixed(2));
+        maxTemp = parseFloat(stats.max.toFixed(2));
+        rowCount = runTemps.length;
       }
     }
   }
@@ -601,28 +705,34 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
 
   setSyncStatus('syncing', 'Saving to Supabase...');
 
-  const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const lotInput = (document.getElementById('lotNumberInput') as HTMLInputElement)?.value.trim() || state.lotNumber || 'EXT-UNKNOWN';
+  const existingMatch = savedReports.find(r => r.lotNumber === lotInput);
+  const reportId = existingMatch?.id || `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   activeUploadingIds.add(reportId);
 
   try {
-    const lotInput = (document.getElementById('lotNumberInput') as HTMLInputElement)?.value.trim() || state.lotNumber || 'EXT-UNKNOWN';
     const cloudFileName = lotInput.toLowerCase().endsWith('.xlsx') ? lotInput : `${lotInput}.xlsx`;
-    const minThreshold = parseFloat((document.getElementById('minThreshold') as HTMLInputElement)?.value) || 35.0;
-    const maxThreshold = parseFloat((document.getElementById('maxThreshold') as HTMLInputElement)?.value) || 39.0;
+    const parsedMinT = parseFloat((document.getElementById('minThreshold') as HTMLInputElement)?.value);
+    const parsedMaxT = parseFloat((document.getElementById('maxThreshold') as HTMLInputElement)?.value);
+    const minThreshold = isNaN(parsedMinT) ? 35.0 : parsedMinT;
+    const maxThreshold = isNaN(parsedMaxT) ? 39.0 : parsedMaxT;
     const startRange = (window as any).Dashboard?.readStart() || (state.sensorData[0]?.time || '');
     const endRange = (window as any).Dashboard?.readEnd() || (state.sensorData[state.sensorData.length - 1]?.time || '');
     const duration = (document.getElementById('footerDurationVal')?.textContent || '').trim() || (window as any).Utils?.formatDuration(startRange, endRange) || '—';
-    
+
     // Filter strictly to the confirmed run time range so min/max is saved as is for this run
+    const normStart = normalizeTs(startRange);
+    const normEnd = normalizeTs(endRange);
     const runPoints = state.sensorData.filter((d: any) => {
-      if (startRange && d.time < startRange) return false;
-      if (endRange && d.time > endRange) return false;
+      const t = normalizeTs(d.time);
+      if (normStart && t < normStart) return false;
+      if (normEnd && t > normEnd) return false;
       return true;
     });
     const targetData = runPoints.length > 0 ? runPoints : state.sensorData;
-    const temps = targetData.map((d: any) => d.temp);
-    const minTemp = temps.length ? Math.min(...temps) : 0;
-    const maxTemp = temps.length ? Math.max(...temps) : 0;
+    const stats = computeMinMax(targetData.map((d: any) => Number(d.temp)));
+    const minTemp = stats ? stats.min : 0;
+    const maxTemp = stats ? stats.max : 0;
 
     let pdfDataUri = '';
     try {
@@ -650,8 +760,8 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
       id: reportId,
       lotNumber: lotInput,
       fileName: cloudFileName,
-      fileSize: lastUploadedFile?.size || 0,
-      fileBase64: (lastUploadedFile && lastUploadedFile.base64.length < 900000) ? lastUploadedFile.base64 : '',
+      fileSize: lastUploadedFile?.size || existingMatch?.fileSize || 0,
+      fileBase64: (lastUploadedFile && lastUploadedFile.base64.length < 900000) ? lastUploadedFile.base64 : (existingMatch?.fileBase64 || ''),
       pdfBase64: (pdfDataUri && pdfDataUri.length < 900000) ? pdfDataUri : '',
       minThreshold,
       maxThreshold,
@@ -666,13 +776,13 @@ export async function saveCurrentReportToCloud(isAutoSave = false) {
       userId: user.id,
       userEmail: user.email || '',
       userDisplayName: user.user_metadata?.full_name || '',
-      createdAt: new Date().toISOString(),
+      createdAt: existingMatch?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isUploading: true
     };
 
     // Update local state and trigger history UI so uploading indicator is visible
-    const existingIndex = savedReports.findIndex(r => r.lotNumber === lotInput);
+    const existingIndex = savedReports.findIndex(r => r.id === reportId || r.lotNumber === lotInput);
     if (existingIndex >= 0) {
       savedReports[existingIndex] = payload;
     } else {
@@ -770,8 +880,9 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
 
   setSyncStatus('syncing', 'Saving...');
   
+  const existingMatch = savedReports.find(r => (report.id && r.id === report.id) || (report.lotNumber && r.lotNumber === report.lotNumber));
   if (!report.id) {
-    report.id = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    report.id = existingMatch?.id || `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   }
   const reportId = report.id;
   activeUploadingIds.add(reportId);
@@ -779,23 +890,31 @@ export async function saveDirectReport(report: SavedReport): Promise<boolean> {
 
   try {
     report.userId = user.id;
+    report.createdAt = report.createdAt || existingMatch?.createdAt || new Date().toISOString();
     report.updatedAt = new Date().toISOString();
 
     // Ensure run min/max is strictly within the run time range
     if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
-      const runFiltered = report.sensorData.filter((d: any) => {
-        if (report.startRange && d.time < report.startRange) return false;
-        if (report.endRange && d.time > report.endRange) return false;
-        return true;
-      });
-      if (runFiltered.length > 0) {
-        const runTemps = runFiltered.map((d: any) => d.temp);
-        report.minTemp = parseFloat(Math.min(...runTemps).toFixed(2));
-        report.maxTemp = parseFloat(Math.max(...runTemps).toFixed(2));
-        report.rowCount = runFiltered.length;
+      const normStart = normalizeTs(report.startRange);
+      const normEnd = normalizeTs(report.endRange);
+      const runTemps: number[] = [];
+      for (let i = 0; i < report.sensorData.length; i++) {
+        const d = report.sensorData[i];
+        const t = normalizeTs(d.time);
+        if (normStart && t < normStart) continue;
+        if (normEnd && t > normEnd) continue;
+        runTemps.push(Number(d.temp));
+      }
+      if (runTemps.length > 0) {
+        const stats = computeMinMax(runTemps);
+        if (stats) {
+          report.minTemp = parseFloat(stats.min.toFixed(2));
+          report.maxTemp = parseFloat(stats.max.toFixed(2));
+          report.rowCount = runTemps.length;
+        }
       }
     }
-    
+
     // Update local cache immediately so user sees uploading status beside file name
     const existingIndex = savedReports.findIndex(r => r.id === report.id || r.lotNumber === report.lotNumber);
     if (existingIndex >= 0) {
@@ -960,12 +1079,14 @@ export function downloadReportExcel(report: SavedReport) {
         uInt8Array[i] = raw.charCodeAt(i);
       }
       const blob = new Blob([uInt8Array], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.href = blobUrl;
       link.download = report.fileName || `Temperature_Report_${report.lotNumber}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
       (window as any).Toast?.success(`📥 Downloaded ${link.download}`);
       return;
     } catch (e) {
@@ -1006,27 +1127,44 @@ export function downloadReportPdf(report: SavedReport) {
   }
 }
 
-export async function deleteReportFromCloud(reportId: string, lotNumber: string) {
-  if (!confirm(`Are you sure you want to delete report for Lot "${lotNumber}" from Supabase?`)) {
-    return;
-  }
+export async function deleteReportFromCloud(reportId: string, lotNumber?: string) {
+  const existing = savedReports.find(r => r.id === reportId);
+  const resolvedLot = lotNumber || existing?.lotNumber || reportId;
+
+  const confirmed = await confirmAction({
+    title: 'Delete Report',
+    message: `Are you sure you want to delete the report for Lot "${resolvedLot}" from Supabase Cloud?`,
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+    danger: true
+  });
+  if (!confirmed) return;
 
   try {
     setSyncStatus('syncing', 'Deleting...');
-    
-    // Remove from local cache
+
+    // Remove from local cache & IndexedDB pending queue/cache
     savedReports = savedReports.filter(r => r.id !== reportId);
     saveLocalReports(savedReports);
     selectedReportIds.delete(reportId);
+    expandedReportIds.delete(reportId);
+    await deleteCachedReport(reportId).catch(() => {});
+    currentPendingCount = await getPendingCount();
+
     renderHistoryDrawer();
     updateHistoryBadge();
     updateBulkBarUI();
 
-    // Remove from Supabase
-    await supabase.from('reports').delete().eq('id', reportId);
+    // Remove from Supabase if online
+    if (isOnline()) {
+      const { error } = await supabase.from('reports').delete().eq('id', reportId);
+      if (error) {
+        console.warn('Supabase delete warning:', error.message);
+      }
+    }
 
-    (window as any).Toast?.success(`🗑️ Deleted report for Lot ${lotNumber}`);
-    setSyncStatus('synced');
+    (window as any).Toast?.success(`🗑️ Deleted report for Lot ${resolvedLot}`);
+    setSyncStatus(currentPendingCount > 0 ? 'queued' : 'synced');
   } catch (err: any) {
     console.error('Supabase delete error:', err);
     (window as any).Toast?.error('Delete failed: ' + (err.message || 'Unknown error'));
@@ -1050,13 +1188,7 @@ export function updateBulkBarUI(currentFiltered?: SavedReport[]) {
 
   bulkBar.style.display = 'flex';
 
-  const query = historySearchQuery.trim().toLowerCase();
-  const targetList = currentFiltered || savedReports.filter(r => {
-    if (!query) return true;
-    return (r.lotNumber && r.lotNumber.toLowerCase().includes(query)) ||
-           (r.fileName && r.fileName.toLowerCase().includes(query)) ||
-           (r.startRange && r.startRange.toLowerCase().includes(query));
-  });
+  const targetList = currentFiltered || getFilteredReports();
 
   const existingIdSet = new Set(savedReports.map(r => r.id));
   for (const id of Array.from(selectedReportIds)) {
@@ -1107,17 +1239,10 @@ export function updateBulkBarUI(currentFiltered?: SavedReport[]) {
 }
 
 export function toggleSelectAllReports() {
-  const query = historySearchQuery.trim().toLowerCase();
-  const targetList = savedReports.filter(r => {
-    if (!query) return true;
-    return (r.lotNumber && r.lotNumber.toLowerCase().includes(query)) ||
-           (r.fileName && r.fileName.toLowerCase().includes(query)) ||
-           (r.startRange && r.startRange.toLowerCase().includes(query));
-  });
-
+  const targetList = getFilteredReports();
   if (targetList.length === 0) return;
 
-  const allSelected = targetList.length > 0 && targetList.every(r => selectedReportIds.has(r.id));
+  const allSelected = targetList.every(r => selectedReportIds.has(r.id));
   if (allSelected) {
     targetList.forEach(r => selectedReportIds.delete(r.id));
   } else {
@@ -1131,9 +1256,14 @@ export async function deleteSelectedReportsFromCloud() {
   const count = selectedReportIds.size;
   if (count === 0) return;
 
-  if (!confirm(`Are you sure you want to permanently delete ${count} selected report(s) from Supabase?\n\nThis operation is irreversible.`)) {
-    return;
-  }
+  const confirmed = await confirmAction({
+    title: `Delete ${count} Report${count > 1 ? 's' : ''}`,
+    message: `Are you sure you want to permanently delete ${count} selected report(s) from Supabase?\n\nThis operation is irreversible.`,
+    confirmText: `Delete (${count})`,
+    cancelText: 'Cancel',
+    danger: true
+  });
+  if (!confirmed) return;
 
   const bulkDeleteBtn = document.getElementById('historyBulkDeleteBtn') as HTMLButtonElement | null;
   const bulkDeleteText = document.getElementById('historyBulkDeleteText');
@@ -1146,11 +1276,20 @@ export async function deleteSelectedReportsFromCloud() {
     const ids = Array.from(selectedReportIds);
     savedReports = savedReports.filter(r => !selectedReportIds.has(r.id));
     saveLocalReports(savedReports);
+    ids.forEach(id => expandedReportIds.delete(id));
     selectedReportIds.clear();
 
-    await supabase.from('reports').delete().in('id', ids);
+    await Promise.all(ids.map(id => deleteCachedReport(id).catch(() => {})));
+    currentPendingCount = await getPendingCount();
 
-    setSyncStatus('synced');
+    if (isOnline()) {
+      const { error } = await supabase.from('reports').delete().in('id', ids);
+      if (error) {
+        console.warn('Supabase bulk delete warning:', error.message);
+      }
+    }
+
+    setSyncStatus(currentPendingCount > 0 ? 'queued' : 'synced');
     renderHistoryDrawer();
     updateHistoryBadge();
     updateBulkBarUI();
@@ -1213,28 +1352,14 @@ export function renderHistoryDrawer() {
 
   savedReports.forEach(r => {
     if (r.isOfflinePending) offlinePendingCount++;
-    const minThreshold = r.minThreshold ?? 35.0;
-    const maxThreshold = r.maxThreshold ?? 39.0;
-    
-    // Evaluate run min/max
-    let runMin = r.minTemp;
-    let runMax = r.maxTemp;
-    if (r.sensorData && r.sensorData.length > 0 && (r.startRange || r.endRange)) {
-      const filteredPts = r.sensorData.filter((d: any) => {
-        if (r.startRange && d.time < r.startRange) return false;
-        if (r.endRange && d.time > r.endRange) return false;
-        return true;
-      });
-      if (filteredPts.length > 0) {
-        const temps = filteredPts.map((d: any) => d.temp);
-        runMin = Math.min(...temps);
-        runMax = Math.max(...temps);
-      }
-    }
-    const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
+    const { isExcursion } = computeRunTelemetry(r);
     if (isExcursion) excursionCount++;
     else inSpecCount++;
   });
+
+  if (currentHistoryFilterTab === 'offline' && offlinePendingCount === 0) {
+    currentHistoryFilterTab = 'all';
+  }
 
   const countAllEl = document.getElementById('filterCountAll');
   const countInSpecEl = document.getElementById('filterCountInSpec');
@@ -1265,7 +1390,7 @@ export function renderHistoryDrawer() {
   const footerSyncText = document.getElementById('drawerSyncFooterText');
   if (footerSyncText) {
     if (!isOnline()) {
-      footerSyncText.textContent = offlinePendingCount > 0 
+      footerSyncText.textContent = offlinePendingCount > 0
         ? `IndexedDB Offline Storage (${offlinePendingCount} pending)`
         : 'IndexedDB Offline Mode Active';
     } else {
@@ -1300,54 +1425,14 @@ export function renderHistoryDrawer() {
     return;
   }
 
-  const query = historySearchQuery.trim().toLowerCase();
-  const filtered = savedReports.filter(report => {
-    // 1. Text Search Filter
-    if (query) {
-      const match = (report.lotNumber && report.lotNumber.toLowerCase().includes(query)) ||
-                    (report.fileName && report.fileName.toLowerCase().includes(query)) ||
-                    (report.startRange && report.startRange.toLowerCase().includes(query));
-      if (!match) return false;
-    }
-
-    // 2. Tab Filter
-    if (currentHistoryFilterTab === 'offline') {
-      return !!report.isOfflinePending;
-    }
-
-    const minThreshold = report.minThreshold ?? 35.0;
-    const maxThreshold = report.maxThreshold ?? 39.0;
-    let runMin = report.minTemp;
-    let runMax = report.maxTemp;
-    if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
-      const filteredPts = report.sensorData.filter((d: any) => {
-        if (report.startRange && d.time < report.startRange) return false;
-        if (report.endRange && d.time > report.endRange) return false;
-        return true;
-      });
-      if (filteredPts.length > 0) {
-        const temps = filteredPts.map((d: any) => d.temp);
-        runMin = Math.min(...temps);
-        runMax = Math.max(...temps);
-      }
-    }
-    const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
-
-    if (currentHistoryFilterTab === 'in-spec') {
-      return !isExcursion;
-    }
-    if (currentHistoryFilterTab === 'excursions') {
-      return isExcursion;
-    }
-    return true;
-  });
+  const filtered = getFilteredReports();
 
   if (filtered.length === 0) {
     listEl.innerHTML = `
       <div class="history-empty">
         <div class="history-empty__icon">🔍</div>
         <h4>No matching reports</h4>
-        <p>No reports matched your search or current filter "${currentHistoryFilterTab}".</p>
+        <p>No reports matched your search or current filter "${escapeHtml(currentHistoryFilterTab)}".</p>
       </div>
     `;
     updateBulkBarUI(filtered);
@@ -1357,40 +1442,20 @@ export function renderHistoryDrawer() {
   listEl.innerHTML = filtered.map(report => {
     const minThreshold = report.minThreshold ?? 35.0;
     const maxThreshold = report.maxThreshold ?? 39.0;
-
-    // Calculate run min/max strictly within the run time range
-    let runMin = report.minTemp;
-    let runMax = report.maxTemp;
-    let runPoints = report.rowCount || report.sensorData?.length || 0;
-
-    if (report.sensorData && report.sensorData.length > 0 && (report.startRange || report.endRange)) {
-      const normStart = report.startRange ? report.startRange.replace(/-/g, '/').replace(' ', '_') : '';
-      const normEnd = report.endRange ? report.endRange.replace(/-/g, '/').replace(' ', '_') : '';
-      const filteredPts = report.sensorData.filter((d: any) => {
-        const t = (d.time || '').replace(/-/g, '/').replace(' ', '_');
-        if (normStart && t < normStart) return false;
-        if (normEnd && t > normEnd) return false;
-        return true;
-      });
-      if (filteredPts.length > 0) {
-        const temps = filteredPts.map((d: any) => Number(d.temp)).filter((n: number) => !isNaN(n));
-        if (temps.length > 0) {
-          runMin = parseFloat(Math.min(...temps).toFixed(1));
-          runMax = parseFloat(Math.max(...temps).toFixed(1));
-          runPoints = filteredPts.length;
-        }
-      }
-    }
+    const { runMin, runMax, runPoints, isExcursion } = computeRunTelemetry(report);
 
     const minDisplay = runMin != null ? `${runMin.toFixed(1)}°C` : '—';
     const maxDisplay = runMax != null ? `${runMax.toFixed(1)}°C` : '—';
-    const isExcursion = (runMin != null && runMin < minThreshold) || (runMax != null && runMax > maxThreshold);
 
-    const dateFormatted = formatSavedDate(report.updatedAt || report.createdAt) || (report.startRange || '—');
-    const durationDisplay = computeRunDuration(report.startRange, report.endRange, report.duration);
+    const dateFormatted = escapeHtml(formatSavedDate(report.updatedAt || report.createdAt) || (report.startRange || '—'));
+    const durationDisplay = escapeHtml(computeRunDuration(report.startRange, report.endRange, report.duration));
 
     const isSelected = selectedReportIds.has(report.id);
-    const displayName = report.fileName || (report.lotNumber ? `Lot_${report.lotNumber}.xlsx` : 'Sensor_Data.xlsx');
+    const safeId = escapeHtml(report.id);
+    const safeLot = escapeHtml(report.lotNumber || '—');
+    const safeDisplayName = escapeHtml(report.fileName || (report.lotNumber ? `Lot_${report.lotNumber}.xlsx` : 'Sensor_Data.xlsx'));
+    const safeStart = escapeHtml(report.startRange || '—');
+    const safeEnd = escapeHtml(report.endRange || '—');
 
     // Uploading / sync status indicator beside file name
     const isUploading = activeUploadingIds.has(report.id) || report.isUploading;
@@ -1425,11 +1490,11 @@ export function renderHistoryDrawer() {
     const isExpanded = expandedReportIds.has(report.id);
 
     return `
-      <div class="history-card ${isSelected ? 'history-card--selected' : ''} ${isExpanded ? 'history-card--expanded' : ''}" data-id="${report.id}" onclick="window.CloudStorage.handleCardClick(event, '${report.id}')">
+      <div class="history-card ${isSelected ? 'history-card--selected' : ''} ${isExpanded ? 'history-card--expanded' : ''}" data-id="${safeId}" onclick="window.CloudStorage.handleCardClick(event, '${safeId}')">
         <!-- Card Header: Compact row shown by default to keep drawer space clean -->
         <div class="hcard-header">
           <label class="hcard-checkbox-label" title="Select report" onclick="event.stopPropagation()">
-            <input type="checkbox" class="history-card-checkbox" data-id="${report.id}" ${isSelected ? 'checked' : ''}>
+            <input type="checkbox" class="history-card-checkbox" data-id="${safeId}" ${isSelected ? 'checked' : ''}>
           </label>
 
           <div class="hcard-header-main">
@@ -1441,13 +1506,13 @@ export function renderHistoryDrawer() {
                   <line x1="8" y1="13" x2="16" y2="13"/>
                   <line x1="8" y1="17" x2="16" y2="17"/>
                 </svg>
-                <strong class="hcard-file-name" title="${displayName}">${displayName}</strong>
+                <strong class="hcard-file-name" title="${safeDisplayName}">${safeDisplayName}</strong>
               </div>
 
               <div class="hcard-title-right">
                 ${uploadStatusHtml}
-                <button id="hexpand-btn-${report.id}" class="hcard-expand-btn" aria-label="${isExpanded ? 'Collapse' : 'Expand full details'}" title="${isExpanded ? 'Click to collapse' : 'Click to show full report details'}" onclick="event.stopPropagation(); window.CloudStorage.toggleCardExpansion('${report.id}')">
-                  <svg id="hchevron-${report.id}" class="hcard-chevron ${isExpanded ? 'is-expanded' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2">
+                <button id="hexpand-btn-${safeId}" class="hcard-expand-btn" aria-label="${isExpanded ? 'Collapse' : 'Expand full details'}" title="${isExpanded ? 'Click to collapse' : 'Click to show full report details'}" onclick="event.stopPropagation(); window.CloudStorage.toggleCardExpansion('${safeId}')">
+                  <svg id="hchevron-${safeId}" class="hcard-chevron ${isExpanded ? 'is-expanded' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2">
                     <polyline points="6 9 12 15 18 9"/>
                   </svg>
                 </button>
@@ -1455,14 +1520,14 @@ export function renderHistoryDrawer() {
             </div>
 
             <div class="hcard-sub-row">
-              <span class="hcard-lot-badge">Lot: ${report.lotNumber || '—'}</span>
+              <span class="hcard-lot-badge">Lot: ${safeLot}</span>
               <span class="hcard-date-meta">Saved ${dateFormatted}</span>
             </div>
           </div>
         </div>
 
         <!-- Full Body: Expands smoothly on click to show telemetry & actions -->
-        <div id="hdetails-${report.id}" class="hcard-full-body" style="display:${isExpanded ? 'flex' : 'none'};">
+        <div id="hdetails-${safeId}" class="hcard-full-body" style="display:${isExpanded ? 'flex' : 'none'};">
           <!-- Precision Run Telemetry Box -->
           <div class="hcard-telemetry">
             <!-- Time Range & Duration / Points line -->
@@ -1472,7 +1537,7 @@ export function renderHistoryDrawer() {
                   <circle cx="12" cy="12" r="10"/>
                   <polyline points="12 6 12 12 16 14"/>
                 </svg>
-                <span class="hcard-range-text">${report.startRange || '—'} → ${report.endRange || '—'}</span>
+                <span class="hcard-range-text">${safeStart} → ${safeEnd}</span>
               </div>
               <div class="hcard-range-stats">
                 <span>${durationDisplay}</span>
@@ -1501,8 +1566,8 @@ export function renderHistoryDrawer() {
             <div class="hcard-compliance-bar ${isExcursion ? 'hcard-compliance-bar--warn' : 'hcard-compliance-bar--ok'}">
               <span class="hcard-compliance-dot">●</span>
               <span>
-                ${isExcursion 
-                  ? `Excursion Detected: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C` 
+                ${isExcursion
+                  ? `Excursion Detected: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C`
                   : `In-Spec Acceptance Criteria: ${minThreshold.toFixed(1)}°C ~ ${maxThreshold.toFixed(1)}°C`
                 }
               </span>
@@ -1511,7 +1576,7 @@ export function renderHistoryDrawer() {
 
           <!-- Action Buttons Footer -->
           <div class="hcard-footer">
-            <button class="hcard-load-btn" onclick="event.stopPropagation(); window.CloudStorage.loadReport('${report.id}')" title="Load report into dashboard">
+            <button class="hcard-load-btn" onclick="event.stopPropagation(); window.CloudStorage.loadReport('${safeId}')" title="Load report into dashboard">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                 <circle cx="12" cy="12" r="3"/>
@@ -1520,7 +1585,7 @@ export function renderHistoryDrawer() {
             </button>
 
             <div class="hcard-footer-right">
-              <button class="hcard-btn-sec" onclick="event.stopPropagation(); window.CloudStorage.downloadExcel('${report.id}')" title="Download Excel (.xlsx)">
+              <button class="hcard-btn-sec" onclick="event.stopPropagation(); window.CloudStorage.downloadExcel('${safeId}')" title="Download Excel (.xlsx)">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/>
@@ -1530,7 +1595,7 @@ export function renderHistoryDrawer() {
                 <span>.XLSX</span>
               </button>
 
-              <button class="hcard-btn-sec" onclick="event.stopPropagation(); window.CloudStorage.downloadPdf('${report.id}')" title="Download PDF Report">
+              <button class="hcard-btn-sec" onclick="event.stopPropagation(); window.CloudStorage.downloadPdf('${safeId}')" title="Download PDF Report">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/>
@@ -1539,7 +1604,7 @@ export function renderHistoryDrawer() {
                 <span>PDF</span>
               </button>
 
-              <button class="hcard-del-btn" onclick="event.stopPropagation(); window.CloudStorage.deleteReport('${report.id}', '${report.lotNumber || ''}')" title="Delete report from Supabase Cloud">
+              <button class="hcard-del-btn" onclick="event.stopPropagation(); window.CloudStorage.deleteReport('${safeId}')" title="Delete report from Supabase Cloud">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>
                 </svg>
@@ -1662,13 +1727,19 @@ export function toggleHistoryDrawer(forceState?: boolean) {
   toggleSelectAll: toggleSelectAllReports,
   onNewReportLoaded: async (fileInfo: { name: string; size: number; fileBuffer: ArrayBuffer }) => {
     try {
-      let binary = '';
-      const bytes = new Uint8Array(fileInfo.fileBuffer);
-      const len = bytes.byteLength;
-      for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
+      const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      let base64 = '';
+      if (typeof (window as any).Utils?.arrayBufferToBase64 === 'function') {
+        base64 = (window as any).Utils.arrayBufferToBase64(fileInfo.fileBuffer, mime);
+      } else {
+        const bytes = new Uint8Array(fileInfo.fileBuffer);
+        const chunks: string[] = [];
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+          chunks.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize))));
+        }
+        base64 = `data:${mime};base64,${window.btoa(chunks.join(''))}`;
       }
-      const base64 = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + window.btoa(binary);
       lastUploadedFile = {
         name: fileInfo.name,
         size: fileInfo.size,
@@ -1687,6 +1758,26 @@ export function toggleHistoryDrawer(forceState?: boolean) {
 };
 
 (window as any).SupabaseStorage = (window as any).CloudStorage;
+
+// Initialize Background Offline Sync Service & UI Listener
+subscribeSyncStatus((event: SyncStatusEvent) => {
+  currentPendingCount = event.pendingCount;
+  const statusMap: Record<SyncStatusEvent['state'], 'synced' | 'syncing' | 'offline' | 'queued'> = {
+    synced: 'synced',
+    syncing: 'syncing',
+    queued: 'queued',
+    offline: 'offline',
+    error: 'offline'
+  };
+  setSyncStatus(statusMap[event.state] || 'offline', event.message);
+
+  if (event.syncedCount && event.syncedCount > 0) {
+    fetchReports();
+  } else if (event.state === 'offline' || event.state === 'queued') {
+    renderHistoryDrawer();
+  }
+});
+initSyncService(supabase);
 
 // Initialize Supabase Auth Session and Listeners
 supabase.auth.getSession().then(({ data: { session } }) => {

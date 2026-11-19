@@ -597,3 +597,35 @@ body.dark .hcard-btn-sec:hover {
   background: #334155;
   color: #f1f5f9;
 }
+
+/* Warning Toast & Destructive Dialog Button */
+.toast.warning {
+  border-color: #f59e0b;
+}
+
+.tbtn--danger {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.tbtn--danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .tbtn--danger,
+html.dark .tbtn--danger,
+body.dark .tbtn--danger {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .tbtn--danger:hover,
+html.dark .tbtn--danger:hover,
+body.dark .tbtn--danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}

@@ -4,7 +4,7 @@
  * Enables offline loading and asset caching
  */
 
-const CACHE_NAME = 'hpt-report-cache-v2';
+const CACHE_NAME = 'hpt-report-cache-v3';
 
 const PRECACHE_URLS = [
   './',
@@ -12,16 +12,16 @@ const PRECACHE_URLS = [
   'manifest.webmanifest',
   'assets/css/style.css?v=20260919',
   'assets/images/logo.png',
-  'assets/js/config.js?v=20261108',
-  'assets/js/i18n.js?v=20261108',
-  'assets/js/utils.js?v=20261108',
-  'assets/js/parser.js?v=20261108',
-  'assets/js/chart.js?v=20261108',
-  'assets/js/dashboard.js?v=20261108',
-  'assets/js/upload-dialog.js?v=20261108',
-  'assets/js/exporter.js?v=20261108',
-  'assets/js/main.js?v=20261108',
-  'assets/js/queue.js?v=20261108',
+  'assets/js/config.js?v=20261118',
+  'assets/js/i18n.js?v=20261118',
+  'assets/js/utils.js?v=20261118',
+  'assets/js/parser.js?v=20261118',
+  'assets/js/chart.js?v=20261118',
+  'assets/js/dashboard.js?v=20261118',
+  'assets/js/upload-dialog.js?v=20261118',
+  'assets/js/exporter.js?v=20261118',
+  'assets/js/main.js?v=20261118',
+  'assets/js/queue.js?v=20261118',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
@@ -65,9 +65,17 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Ignore non-GET and chrome-extension / firebase websocket requests
+  // Ignore non-GET, non-HTTP(S), and live cloud API / realtime requests
   if (request.method !== 'GET') return;
-  if (url.origin.includes('firestore.googleapis.com') || url.origin.includes('identitytoolkit.googleapis.com')) {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  if (
+    url.hostname.endsWith('.supabase.co') ||
+    url.pathname.startsWith('/rest/v1/') ||
+    url.pathname.startsWith('/auth/v1/') ||
+    url.pathname.startsWith('/realtime/v1/') ||
+    url.origin.includes('firestore.googleapis.com') ||
+    url.origin.includes('identitytoolkit.googleapis.com')
+  ) {
     return;
   }
 

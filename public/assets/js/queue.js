@@ -64,11 +64,16 @@ const QueueManager = {
         if (backdrop) backdrop.classList.add('is-open');
     },
 
-    close() {
+    async close() {
         if (this.isProcessing) {
-            if (!confirm('Processing is still in progress. Are you sure you want to dismiss the queue view?')) {
-                return;
-            }
+            const ok = await Utils.confirmDialog({
+                title: 'Processing in Progress',
+                message: 'Batch upload processing is still running. Are you sure you want to dismiss the queue view?',
+                confirmText: 'Dismiss',
+                cancelText: 'Keep Open',
+                danger: false
+            });
+            if (!ok) return;
         }
         const modal = document.getElementById('bulkUploadModal');
         const backdrop = document.getElementById('bulkUploadBackdrop');
@@ -171,29 +176,25 @@ const QueueManager = {
             // Filter points strictly to the run range
             const runFiltered = bestResult.data.filter(d => (!runStart || d.time >= runStart) && (!runEnd || d.time <= runEnd));
             const targetPoints = runFiltered.length > 0 ? runFiltered : bestResult.data;
-            const temps = targetPoints.map(d => d.temp);
-            item.minTemp = temps.length ? Math.min(...temps) : 0;
-            item.maxTemp = temps.length ? Math.max(...temps) : 0;
+            const { min: minRun, max: maxRun } = Utils.minMax(targetPoints.map(d => d.temp));
+            item.minTemp = minRun != null ? minRun : 0;
+            item.maxTemp = maxRun != null ? maxRun : 0;
             item.rowCount = targetPoints.length;
 
-            const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
-            const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
+            const rawMin = parseFloat(document.getElementById('minThreshold')?.value);
+            const rawMax = parseFloat(document.getElementById('maxThreshold')?.value);
+            const minThresh = isNaN(rawMin) ? CONFIG.DEFAULT_MIN_THRESHOLD : rawMin;
+            const maxThresh = isNaN(rawMax) ? CONFIG.DEFAULT_MAX_THRESHOLD : rawMax;
             const inRange = targetPoints.filter(d => d.temp >= minThresh && d.temp <= maxThresh).length;
             item.compliancePct = parseFloat(((inRange / targetPoints.length) * 100).toFixed(1));
 
-            // 3. Attempt direct save to Cloud Firestore with Lot Number as filename
+            // 3. Attempt direct save to Supabase Cloud with Lot Number as filename
             if (window.CloudStorage && typeof window.CloudStorage.saveDirectReport === 'function') {
                 item.status = 'saving';
                 item.progress = 90;
                 this.render();
 
-                // Convert file buffer to Base64
-                let binary = '';
-                const bytes = new Uint8Array(buffer);
-                for (let b = 0; b < bytes.byteLength; b++) {
-                    binary += String.fromCharCode(bytes[b]);
-                }
-                const base64 = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + window.btoa(binary);
+                const base64 = Utils.arrayBufferToBase64(buffer);
                 const cloudFileName = item.lotNumber.toLowerCase().endsWith('.xlsx') ? item.lotNumber : `${item.lotNumber}.xlsx`;
 
                 const saved = await window.CloudStorage.saveDirectReport({
@@ -203,8 +204,8 @@ const QueueManager = {
                     fileBase64: base64,
                     minThreshold: minThresh,
                     maxThreshold: maxThresh,
-                    startRange: bestResult.start || firstTime,
-                    endRange: bestResult.end || lastTime,
+                    startRange: runStart,
+                    endRange: runEnd,
                     minTemp: parseFloat(item.minTemp.toFixed(2)),
                     maxTemp: parseFloat(item.maxTemp.toFixed(2)),
                     duration: item.duration,
@@ -410,13 +411,13 @@ const QueueManager = {
                     progressClass = 'qprogress-bar--done';
                     break;
                 case 'error':
-                    statusBadge = `<span class="qbadge qbadge--error" title="${item.error}">❌ Error</span>`;
+                    statusBadge = `<span class="qbadge qbadge--error" title="${Utils.escapeHtml(item.error)}">❌ Error</span>`;
                     progressClass = 'qprogress-bar--error';
                     break;
             }
 
             const cloudPill = item.savedToCloud 
-                ? '<span class="qcloud-pill" title="Saved to Cloud Firestore">☁️ Synced</span>'
+                ? '<span class="qcloud-pill" title="Saved to Supabase Cloud">☁️ Synced</span>'
                 : '';
 
             const complianceBadge = item.compliancePct != null
@@ -425,7 +426,11 @@ const QueueManager = {
                     : `<span class="qcomp-pill qcomp-pill--warn">${item.compliancePct}% Spec</span>`)
                 : '';
 
+            const safeName = Utils.escapeHtml(item.name);
+            const safeLotVal = Utils.escapeHtml(item.lotNumber !== '—' ? item.lotNumber : '');
             const cloudFileName = item.lotNumber.toLowerCase().endsWith('.xlsx') ? item.lotNumber : `${item.lotNumber}.xlsx`;
+            const safeCloudFile = Utils.escapeHtml(cloudFileName);
+            const safeErr = Utils.escapeHtml(item.error);
 
             return `
                 <div class="queue-item queue-item--${item.status}">
@@ -433,8 +438,8 @@ const QueueManager = {
                         <div class="queue-item__info">
                             <span class="queue-item__icon">📄</span>
                             <div class="queue-item__names">
-                                <strong class="queue-item__file truncate" title="${item.name}">${item.name}</strong>
-                                <span class="queue-item__lot-orig">Original: <code>${item.name}</code></span>
+                                <strong class="queue-item__file truncate" title="${safeName}">${safeName}</strong>
+                                <span class="queue-item__lot-orig">Original: <code>${safeName}</code></span>
                             </div>
                         </div>
                         <div class="queue-item__badges">
@@ -448,11 +453,11 @@ const QueueManager = {
                     <div class="queue-item__lot-edit-box">
                         <div class="queue-lot-field">
                             <label class="queue-item__lot-lbl">Lot Number:</label>
-                            <input type="text" class="queue-lot-input" data-id="${item.id}" value="${item.lotNumber !== '—' ? item.lotNumber : ''}" placeholder="Enter Lot Number">
+                            <input type="text" class="queue-lot-input" data-id="${item.id}" value="${safeLotVal}" placeholder="Enter Lot Number">
                         </div>
                         <div class="queue-cloud-name">
                             <span>☁️ Cloud File:</span>
-                            <code>${cloudFileName}</code>
+                            <code>${safeCloudFile}</code>
                         </div>
                     </div>
 
@@ -463,9 +468,9 @@ const QueueManager = {
                     <div class="queue-item__footer">
                         <div class="queue-item__stats">
                             ${item.status === 'done' 
-                                ? `<span>📊 ${item.rowCount} rows</span> · <span>⏱️ ${item.duration}</span> · <span>🌡️ ${item.minTemp?.toFixed(1)}° ~ ${item.maxTemp?.toFixed(1)}°C</span>`
+                                ? `<span>📊 ${item.rowCount} rows</span> · <span>⏱️ ${Utils.escapeHtml(item.duration)}</span> · <span>🌡️ ${item.minTemp?.toFixed(1)}° ~ ${item.maxTemp?.toFixed(1)}°C</span>`
                                 : (item.status === 'error' 
-                                    ? `<span class="qerror-msg">⚠️ ${item.error}${item.retries ? ` (Attempt ${item.retries + 1})` : ''}</span>`
+                                    ? `<span class="qerror-msg">⚠️ ${safeErr}${item.retries ? ` (Attempt ${item.retries + 1})` : ''}</span>`
                                     : `<span>Size: ${(item.size / 1024).toFixed(1)} KB</span>`)}
                         </div>
 
@@ -474,7 +479,7 @@ const QueueManager = {
                                 <button class="qaction-btn qaction-btn--load" onclick="QueueManager.loadToDashboard(${item.id})" title="Load into dashboard and show graph">
                                     <span>📊 Show Graph</span>
                                 </button>
-                                <button class="qaction-btn qaction-btn--save" onclick="QueueManager.saveItemToCloud(${item.id})" title="Save to Cloud as ${cloudFileName}">
+                                <button class="qaction-btn qaction-btn--save" onclick="QueueManager.saveItemToCloud(${item.id})" title="Save to Supabase Cloud as ${safeCloudFile}">
                                     <span>☁️ Save Cloud</span>
                                 </button>
                                 <button class="qaction-btn qaction-btn--config" onclick="QueueManager.openItemInDialog(${item.id})" title="Adjust Start/End dates & Lot Number">
@@ -521,18 +526,15 @@ const QueueManager = {
         try {
             item.status = 'saving';
             this.render();
-            Toast.info(`☁️ Saving Lot [${item.lotNumber}] to Cloud Firestore...`);
+            Toast.info(`☁️ Saving Lot [${item.lotNumber}] to Supabase Cloud...`);
 
             const buffer = await item.file.arrayBuffer();
-            let binary = '';
-            const bytes = new Uint8Array(buffer);
-            for (let b = 0; b < bytes.byteLength; b++) {
-                binary += String.fromCharCode(bytes[b]);
-            }
-            const base64 = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + window.btoa(binary);
+            const base64 = Utils.arrayBufferToBase64(buffer);
 
-            const minThresh = parseFloat(document.getElementById('minThreshold')?.value) || 35.0;
-            const maxThresh = parseFloat(document.getElementById('maxThreshold')?.value) || 39.0;
+            const rawMin = parseFloat(document.getElementById('minThreshold')?.value);
+            const rawMax = parseFloat(document.getElementById('maxThreshold')?.value);
+            const minThresh = isNaN(rawMin) ? CONFIG.DEFAULT_MIN_THRESHOLD : rawMin;
+            const maxThresh = isNaN(rawMax) ? CONFIG.DEFAULT_MAX_THRESHOLD : rawMax;
             const cloudFileName = item.lotNumber.toLowerCase().endsWith('.xlsx') ? item.lotNumber : `${item.lotNumber}.xlsx`;
 
             const saved = await window.CloudStorage.saveDirectReport({

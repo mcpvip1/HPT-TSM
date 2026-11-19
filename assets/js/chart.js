@@ -93,8 +93,9 @@ const complianceBandPlugin = {
     beforeDatasetsDraw(chart) {
         const pal = currentPalette();
         const { ctx, chartArea: { top, right, bottom, left }, scales: { y } } = chart;
-        const minT = parseFloat(document.getElementById('minThreshold').value);
-        const maxT = parseFloat(document.getElementById('maxThreshold').value);
+        const minT = parseFloat(document.getElementById('minThreshold')?.value);
+        const maxT = parseFloat(document.getElementById('maxThreshold')?.value);
+        if (isNaN(minT) || isNaN(maxT)) return;
         const yTop = y.getPixelForValue(maxT);
         const yBot = y.getPixelForValue(minT);
         if (yTop < bottom && yBot > top) {
@@ -114,8 +115,9 @@ const thresholdLinePlugin = {
         const labelSize = (chart.options.plugins &&
             chart.options.plugins.thresholdLabels &&
             chart.options.plugins.thresholdLabels.fontSize) || 11;
-        const minT = parseFloat(document.getElementById('minThreshold').value);
-        const maxT = parseFloat(document.getElementById('maxThreshold').value);
+        const minT = parseFloat(document.getElementById('minThreshold')?.value);
+        const maxT = parseFloat(document.getElementById('maxThreshold')?.value);
+        if (isNaN(minT) || isNaN(maxT)) return;
         ctx.save();
         ctx.textBaseline = 'middle';
 
@@ -171,10 +173,13 @@ const extremesPlugin = {
         const ds = chart.data.datasets[0];
         if (!ds?.data?.length) return;
         const { ctx } = chart;
-        const minVal = Math.min(...ds.data);
-        const maxVal = Math.max(...ds.data);
-        const minIdx = ds.data.indexOf(minVal);
-        const maxIdx = ds.data.indexOf(maxVal);
+        let minVal = Infinity, maxVal = -Infinity, minIdx = -1, maxIdx = -1;
+        for (let i = 0; i < ds.data.length; i++) {
+            const v = ds.data[i];
+            if (typeof v !== 'number' || isNaN(v)) continue;
+            if (v < minVal) { minVal = v; minIdx = i; }
+            if (v > maxVal) { maxVal = v; maxIdx = i; }
+        }
         const meta = chart.getDatasetMeta(0);
 
         const drawPoint = (idx, color) => {
@@ -300,8 +305,9 @@ const ChartFactory = {
 
     segmentColor(segCtx) {
         const pal = currentPalette();
-        const minT = parseFloat(document.getElementById('minThreshold').value);
-        const maxT = parseFloat(document.getElementById('maxThreshold').value);
+        const minT = parseFloat(document.getElementById('minThreshold')?.value);
+        const maxT = parseFloat(document.getElementById('maxThreshold')?.value);
+        if (isNaN(minT) || isNaN(maxT)) return pal.segIn;
         if (segCtx.p0.parsed.y > maxT || segCtx.p1.parsed.y > maxT) return pal.segHigh;
         if (segCtx.p0.parsed.y < minT || segCtx.p1.parsed.y < minT) return pal.segLow;
         return pal.segIn;
@@ -309,8 +315,9 @@ const ChartFactory = {
 
     segmentDash(segCtx) {
         if (state.chartMode !== 'mono') return [];
-        const minT = parseFloat(document.getElementById('minThreshold').value);
-        const maxT = parseFloat(document.getElementById('maxThreshold').value);
+        const minT = parseFloat(document.getElementById('minThreshold')?.value);
+        const maxT = parseFloat(document.getElementById('maxThreshold')?.value);
+        if (isNaN(minT) || isNaN(maxT)) return [];
         const out = segCtx.p0.parsed.y > maxT || segCtx.p1.parsed.y > maxT
             || segCtx.p0.parsed.y < minT || segCtx.p1.parsed.y < minT;
         return out ? [6, 4] : [];
@@ -466,16 +473,16 @@ const TooltipHandler = {
         const dp = tooltip.dataPoints?.[0];
         if (!dp) { tip.classList.remove('show'); return; }
 
-        const minT = parseFloat(document.getElementById('minThreshold').value);
-        const maxT = parseFloat(document.getElementById('maxThreshold').value);
+        const minT = parseFloat(document.getElementById('minThreshold')?.value);
+        const maxT = parseFloat(document.getElementById('maxThreshold')?.value);
         const value = dp.parsed.y;
 
         let statusClass = 'ok', statusText = '● In criteria range';
-        if (value > maxT) {
+        if (!isNaN(maxT) && value > maxT) {
             const diff = (value - maxT).toFixed(2);
             statusClass = 'hi';
             statusText = `▲ High Outlier (+${diff}°C > ${maxT.toFixed(1)}°C)`;
-        } else if (value < minT) {
+        } else if (!isNaN(minT) && value < minT) {
             const diff = (minT - value).toFixed(2);
             statusClass = 'lo';
             statusText = `▼ Low Outlier (-${diff}°C < ${minT.toFixed(1)}°C)`;

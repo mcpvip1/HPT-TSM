@@ -87,28 +87,67 @@ const Dashboard = {
 
     update() {
         if (state.sensorData.length === 0) return;
-        const minThreshold = parseFloat(document.getElementById('minThreshold').value);
-        const maxThreshold = parseFloat(document.getElementById('maxThreshold').value);
+        const rawMin = parseFloat(document.getElementById('minThreshold')?.value);
+        const rawMax = parseFloat(document.getElementById('maxThreshold')?.value);
+        const minThreshold = isNaN(rawMin) ? CONFIG.DEFAULT_MIN_THRESHOLD : rawMin;
+        const maxThreshold = isNaN(rawMax) ? CONFIG.DEFAULT_MAX_THRESHOLD : rawMax;
+
+        // Dynamically sync Acceptance Criteria display with active thresholds
+        const fmtCrit = (n) => Number.isInteger(n) ? `${n}℃` : `${n.toFixed(1)}℃`;
+        const criteriaEl = document.getElementById('footerCriteriaVal');
+        if (criteriaEl) {
+            criteriaEl.textContent = `${fmtCrit(minThreshold)}～${fmtCrit(maxThreshold)}`;
+        }
+
         const startVal = this.readStart();
         const endVal = this.readEnd();
         this.updateBiCycle();
         this.updateDuration();
 
+        const normStart = startVal ? startVal.replace(/-/g, '/').replace(' ', '_') : '';
+        const normEnd = endVal ? endVal.replace(/-/g, '/').replace(' ', '_') : '';
+
         const filtered = state.sensorData.filter(d => {
-            if (startVal && d.time < startVal) return false;
-            if (endVal && d.time > endVal) return false;
+            const t = (d.time || '').replace(/-/g, '/').replace(' ', '_');
+            if (normStart && t < normStart) return false;
+            if (normEnd && t > normEnd) return false;
             return true;
         });
-        if (filtered.length === 0) return;
+
+        const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+        if (filtered.length === 0) {
+            setText('footerMinVal', '--');
+            setText('footerMaxVal', '--');
+            const pill = document.getElementById('outlierCountPill');
+            if (pill) {
+                pill.textContent = '0';
+                pill.className = 'outlier-count-pill outlier-count-pill--zero';
+            }
+            const banner = document.getElementById('excursionBanner');
+            if (banner) {
+                banner.className = 'excursion-banner excursion-banner--warn show';
+                banner.innerHTML = `
+                    <div class="excursion-banner__icon">⚠️</div>
+                    <div class="excursion-banner__text">
+                        <strong>No readings in selected time range.</strong> Adjust Start/End Date &amp; Time or click <em>Full Result</em>.
+                    </div>
+                `;
+            }
+            if (state.chart) {
+                state.chart.data.labels = [];
+                state.chart.data.datasets[0].data = [];
+                state.chart.update();
+            }
+            return;
+        }
 
         const temps = filtered.map(d => d.temp);
         const labels = filtered.map(d => d.time);
-        const minT = Math.min(...temps);
-        const maxT = Math.max(...temps);
+        const { min: minT, max: maxT } = Utils.minMax(temps);
 
-        const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-        setText('footerMinVal', `${minT.toFixed(1)}°C`);
-        setText('footerMaxVal', `${maxT.toFixed(1)}°C`);
+        setText('footerMinVal', minT != null ? `${minT.toFixed(1)}°C` : '--');
+        setText('footerMaxVal', maxT != null ? `${maxT.toFixed(1)}°C` : '--');
 
         // Outlier & Excursion Analysis
         const highOutliers = filtered.filter(d => d.temp > maxThreshold);
@@ -146,19 +185,22 @@ const Dashboard = {
             }
         }
 
+        const yMin = Math.floor(Math.min(minT ?? minThreshold, minThreshold) - 1);
+        const yMax = Math.ceil(Math.max(maxT ?? maxThreshold, maxThreshold) + 1);
+
         if (state.chart) {
             state.chart.data.labels = labels;
             state.chart.data.datasets[0].data = temps;
-            state.chart.options.scales.y.min = Math.floor(Math.min(minT, minThreshold) - 1);
-            state.chart.options.scales.y.max = Math.ceil(Math.max(maxT, maxThreshold) + 1);
+            state.chart.options.scales.y.min = yMin;
+            state.chart.options.scales.y.max = yMax;
             state.chart.update();
         } else if (window.ChartFactory && document.getElementById('mainChart')) {
             state.chart = ChartFactory.createMain(document.getElementById('mainChart'));
             if (state.chart) {
                 state.chart.data.labels = labels;
                 state.chart.data.datasets[0].data = temps;
-                state.chart.options.scales.y.min = Math.floor(Math.min(minT, minThreshold) - 1);
-                state.chart.options.scales.y.max = Math.ceil(Math.max(maxT, maxThreshold) + 1);
+                state.chart.options.scales.y.min = yMin;
+                state.chart.options.scales.y.max = yMax;
                 state.chart.update();
             }
         }

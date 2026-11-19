@@ -46,6 +46,81 @@ const Utils = {
         if (minutes > 0 || parts.length === 0) parts.push(`${minutes}min`);
 
         return parts.join(' ');
+    },
+
+    minMax(values) {
+        if (!values || values.length === 0) return { min: null, max: null };
+        let min = Infinity;
+        let max = -Infinity;
+        for (let i = 0; i < values.length; i++) {
+            const v = Number(values[i]);
+            if (isNaN(v)) continue;
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+        return min === Infinity ? { min: null, max: null } : { min, max };
+    },
+
+    escapeHtml(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    arrayBufferToBase64(buffer, mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+        const bytes = new Uint8Array(buffer);
+        const chunkSize = 0x8000;
+        const chunks = [];
+        for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+            chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize)));
+        }
+        return `data:${mimeType};base64,` + window.btoa(chunks.join(''));
+    },
+
+    confirmDialog({ title = 'Confirm Action', message = '', confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
+        return new Promise((resolve) => {
+            const existing = document.getElementById('appConfirmModalBackdrop');
+            if (existing) existing.remove();
+
+            const backdrop = document.createElement('div');
+            backdrop.id = 'appConfirmModalBackdrop';
+            backdrop.className = 'domain-modal-backdrop';
+            backdrop.innerHTML = `
+                <div class="domain-modal" role="dialog" aria-modal="true" style="max-width:420px;">
+                    <div class="domain-modal__header">
+                        <h3 class="domain-modal__title"><span>${this.escapeHtml(title)}</span></h3>
+                        <button type="button" id="appConfirmCloseBtn" class="history-drawer__close" style="width:28px;height:28px;font-size:14px;">✕</button>
+                    </div>
+                    <div class="domain-modal__body" style="white-space:pre-line;">${this.escapeHtml(message)}</div>
+                    <div class="domain-modal__footer">
+                        <button type="button" id="appConfirmCancelBtn" class="tbtn tbtn--cancel">${this.escapeHtml(cancelText)}</button>
+                        <button type="button" id="appConfirmOkBtn" class="tbtn ${danger ? 'tbtn--danger' : 'tbtn--upload'}">${this.escapeHtml(confirmText)}</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(backdrop);
+
+            const cleanup = (result) => {
+                document.removeEventListener('keydown', onKey);
+                backdrop.remove();
+                resolve(result);
+            };
+            const onKey = (e) => {
+                if (e.key === 'Escape') cleanup(false);
+            };
+            document.addEventListener('keydown', onKey);
+
+            backdrop.addEventListener('click', (e) => {
+                if (e.target === backdrop) cleanup(false);
+            });
+            document.getElementById('appConfirmCloseBtn')?.addEventListener('click', () => cleanup(false));
+            document.getElementById('appConfirmCancelBtn')?.addEventListener('click', () => cleanup(false));
+            document.getElementById('appConfirmOkBtn')?.addEventListener('click', () => cleanup(true));
+            document.getElementById('appConfirmOkBtn')?.focus();
+        });
     }
 };
 
@@ -61,6 +136,7 @@ const Toast = {
     },
     success(msg) { this.show(msg, 'success'); },
     error(msg) { this.show(msg, 'error'); },
+    warning(msg) { this.show(msg, 'warning', 5000); },
     info(msg) { this.show(msg, 'info'); }
 };
 

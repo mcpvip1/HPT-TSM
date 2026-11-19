@@ -1,11 +1,14 @@
 const Exporter = {
     buildPrintSheet() {
         const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-        setText('psBiCycle', document.getElementById('biCycleVal').textContent);
-        setText('psLot', document.getElementById('metaLotVal').textContent);
-        setText('psFooterMin', document.getElementById('footerMinVal').textContent);
-        setText('psFooterMax', document.getElementById('footerMaxVal').textContent);
-        setText('psFooterDuration', document.getElementById('footerDurationVal').textContent);
+        setText('psBiCycle', document.getElementById('biCycleVal')?.textContent || '—');
+        setText('psLot', document.getElementById('metaLotVal')?.textContent || '—');
+        setText('psFooterCriteria', document.getElementById('footerCriteriaVal')?.textContent || '35℃～39℃');
+        setText('psFooterMin', document.getElementById('footerMinVal')?.textContent || '--');
+        setText('psFooterMax', document.getElementById('footerMaxVal')?.textContent || '--');
+        setText('psFooterDuration', document.getElementById('footerDurationVal')?.textContent || '--');
+
+        if (!state.chart) return;
 
         if (state.printChart) {
             try { state.printChart.destroy(); } catch (e) { }
@@ -16,6 +19,7 @@ const Exporter = {
 
         /* Replace canvas with a fresh one — fixes shrinking-on-repeat bug */
         const oldCanvas = document.getElementById('psChart');
+        if (!oldCanvas || !oldCanvas.parentElement) return;
         const parent = oldCanvas.parentElement;
         const freshCanvas = document.createElement('canvas');
         freshCanvas.id = 'psChart';
@@ -48,6 +52,7 @@ const Exporter = {
 
     async prepareA4Canvas() {
         const stage = document.getElementById('a4PrintSheet');
+        if (!stage) throw new Error('Print sheet container not found');
 
         Object.assign(stage.style, {
             position: 'fixed', left: '0', top: '0',
@@ -56,27 +61,29 @@ const Exporter = {
             zIndex: '99999', pointerEvents: 'none', opacity: '1'
         });
 
-        await Utils.nextFrame();
-        await Utils.nextFrame();
-        await Utils.sleep(80);
+        try {
+            await Utils.nextFrame();
+            await Utils.nextFrame();
+            await Utils.sleep(80);
 
-        this.buildPrintSheet();
-        await Utils.sleep(500);
-        await Utils.nextFrame();
+            this.buildPrintSheet();
+            await Utils.sleep(500);
+            await Utils.nextFrame();
 
-        const canvas = await html2canvas(stage, {
-            backgroundColor: '#ffffff',
-            scale: 2,
-            width: CONFIG.CHART_PRINT_WIDTH,
-            height: CONFIG.CHART_PRINT_HEIGHT,
-            windowWidth: CONFIG.CHART_PRINT_WIDTH,
-            windowHeight: CONFIG.CHART_PRINT_HEIGHT,
-            allowTaint: false, useCORS: true, logging: false,
-            scrollX: 0, scrollY: 0
-        });
-
-        stage.removeAttribute('style');
-        return canvas;
+            const canvas = await html2canvas(stage, {
+                backgroundColor: '#ffffff',
+                scale: 2,
+                width: CONFIG.CHART_PRINT_WIDTH,
+                height: CONFIG.CHART_PRINT_HEIGHT,
+                windowWidth: CONFIG.CHART_PRINT_WIDTH,
+                windowHeight: CONFIG.CHART_PRINT_HEIGHT,
+                allowTaint: false, useCORS: true, logging: false,
+                scrollX: 0, scrollY: 0
+            });
+            return canvas;
+        } finally {
+            stage.removeAttribute('style');
+        }
     },
 
     async exportPNG() {

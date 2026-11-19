@@ -44,6 +44,7 @@ const AutoSaver = {
             state.rawData = data.sensorData.slice();
             state.lotNumber = data.lotNumber || '';
             state.chartMode = data.chartMode || 'color';
+            state.currentFileName = data.fileName || '';
 
             const lotInput = document.getElementById('lotNumberInput');
             if (lotInput) lotInput.value = state.lotNumber;
@@ -88,6 +89,15 @@ const App = {
         Debug.init();
         Appearance.init();    /* applies saved theme to <html> and <body> */
 
+        try {
+            const savedLang = localStorage.getItem('hpt_language');
+            if (savedLang && TRANSLATIONS[savedLang]) {
+                I18n.apply(savedLang);
+                const langSel = document.getElementById('langSelect');
+                if (langSel) langSel.value = savedLang;
+            }
+        } catch (e) { }
+
         state.chart = ChartFactory.createMain(document.getElementById('mainChart'));
 
         // Restore autosaved report if available, otherwise generate default demo data
@@ -116,6 +126,7 @@ const App = {
 
         const langSelect = $('langSelect');
         if (langSelect) langSelect.addEventListener('change', e => {
+            try { localStorage.setItem('hpt_language', e.target.value); } catch (err) { }
             I18n.apply(e.target.value);
             Dashboard.update();
         });
@@ -156,7 +167,10 @@ const App = {
 
         ['minThreshold', 'maxThreshold'].forEach(id => {
             const el = $(id);
-            if (el) el.addEventListener('change', () => Dashboard.update());
+            if (el) {
+                el.addEventListener('change', () => Dashboard.update());
+                el.addEventListener('input', Utils.debounce(() => Dashboard.update(), 200));
+            }
         });
 
         const colorBtn = $('modeColorBtn');

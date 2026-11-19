@@ -21,6 +21,7 @@ export type SyncState = 'synced' | 'syncing' | 'queued' | 'offline' | 'error';
 export interface SyncStatusEvent {
   state: SyncState;
   pendingCount: number;
+  syncedCount?: number;
   message?: string;
 }
 
@@ -54,42 +55,29 @@ export function setSupabaseClient(client: SupabaseClient) {
 }
 
 /**
- * Maps an OfflineQueuedReport to the Supabase database schema
+ * Maps an OfflineQueuedReport to the exact public.reports Supabase table schema
  */
 export function mapQueuedReportToDbRow(report: OfflineQueuedReport, userId: string): Record<string, any> {
-  const meta: Record<string, any> = {
-    lotNumber: report.lotNumber,
-    fileName: report.fileName,
-    fileSize: report.fileSize,
-    startRange: report.startRange,
-    endRange: report.endRange,
-    duration: report.duration,
-    rowCount: report.rowCount,
-    chartMode: report.chartMode || 'color',
-    userEmail: report.userEmail,
-    userDisplayName: report.userDisplayName,
-    offlineCreated: true
-  };
-
-  if (report.fileBase64 && report.fileBase64.length < 900000) {
-    meta.fileBase64 = report.fileBase64;
-  }
-  if (report.pdfBase64 && report.pdfBase64.length < 900000) {
-    meta.pdfBase64 = report.pdfBase64;
-  }
-
   return {
     id: report.id,
-    user_id: userId,
     lot_number: report.lotNumber,
     file_name: report.fileName || `${report.lotNumber}.xlsx`,
+    file_size: report.fileSize || 0,
+    file_base64: (report.fileBase64 && report.fileBase64.length < 900000) ? report.fileBase64 : '',
+    pdf_base64: (report.pdfBase64 && report.pdfBase64.length < 900000) ? report.pdfBase64 : '',
     min_threshold: report.minThreshold,
     max_threshold: report.maxThreshold,
+    start_range: report.startRange || '',
+    end_range: report.endRange || '',
     min_temp: report.minTemp ?? null,
     max_temp: report.maxTemp ?? null,
-    points_count: report.rowCount || (report.sensorData ? report.sensorData.length : 0),
+    duration: report.duration || '',
+    row_count: report.rowCount || (report.sensorData ? report.sensorData.length : 0),
     sensor_data: report.sensorData || [],
-    metadata: meta,
+    chart_mode: report.chartMode || 'color',
+    user_id: userId,
+    user_email: report.userEmail || '',
+    user_display_name: report.userDisplayName || '',
     created_at: report.createdAt || new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
@@ -128,6 +116,7 @@ export async function syncPendingReports(): Promise<{ synced: number; failed: nu
       notifyListeners({
         state: 'synced',
         pendingCount: 0,
+        syncedCount: 0,
         message: 'Supabase Synced'
       });
       isSyncInProgress = false;
@@ -173,16 +162,15 @@ export async function syncPendingReports(): Promise<{ synced: number; failed: nu
     const remainingCount = await getPendingCount();
 
     if (syncedCount > 0) {
-      if ((window as any).Toast && typeof (window as any).Toast.success === 'function') {
-        (window as any).Toast.success(`☁️ Synced ${syncedCount} offline report${syncedCount > 1 ? 's' : ''} to Supabase!`);
-      }
+      (window as any).Toast?.success?.(`☁️ Synced ${syncedCount} offline report${syncedCount > 1 ? 's' : ''} to Supabase!`);
     }
 
     notifyListeners({
       state: remainingCount > 0 ? 'queued' : 'synced',
       pendingCount: remainingCount,
-      message: remainingCount > 0 
-        ? `Pending sync (${remainingCount})` 
+      syncedCount,
+      message: remainingCount > 0
+        ? `Pending sync (${remainingCount})`
         : 'Supabase Synced'
     });
 
@@ -204,15 +192,16 @@ export async function syncPendingReports(): Promise<{ synced: number; failed: nu
 /**
  * Initializes network listeners for automatic background sync
  */
+let isInitialized = false;
 export function initSyncService(supabase: SupabaseClient) {
   setSupabaseClient(supabase);
+  if (isInitialized) return;
+  isInitialized = true;
 
   // Monitor network state transitions
   window.addEventListener('online', async () => {
     console.log('[SyncService] Connection restored. Triggering auto-sync...');
-    if ((window as any).Toast) {
-      (window as any).Toast.info('🌐 Connection restored! Syncing offline sensor data...');
-    }
+    (window as any).Toast?.info?.('🌐 Connection restored! Syncing offline sensor data...');
     // Small delay to allow full socket handshake
     setTimeout(() => {
       syncPendingReports();
@@ -227,9 +216,7 @@ export function initSyncService(supabase: SupabaseClient) {
       pendingCount: count,
       message: count > 0 ? `Offline (${count} pending)` : 'Offline mode'
     });
-    if ((window as any).Toast) {
-      (window as any).Toast.warning('📡 Working Offline. All sensor uploads will be preserved in IndexedDB.');
-    }
+    (window as any).Toast?.warning?.('📡 Working Offline. All sensor uploads will be preserved in IndexedDB.');
   });
 
   // Initial check on load
@@ -240,7 +227,7 @@ export function initSyncService(supabase: SupabaseClient) {
       notifyListeners({
         state: isOnline() ? 'synced' : 'offline',
         pendingCount: count,
-        message: !isOnline() ? `Offline (${count} pending)` : undefined
+        message: !isOnline() ? (count > 0 ? `Offline (${count} pending)` : 'Offline mode') : undefined
       });
     }
   });
